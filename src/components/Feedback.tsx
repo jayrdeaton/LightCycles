@@ -14,41 +14,40 @@ interface Props {
 }
 
 export function Feedback({ children }: Props) {
-  const [hapticSettings, setHapticSettings] = useState<Partial<HapticSettings>>({ vibrate: true })
-  const [soundSettings, setSoundSettings] = useState<Partial<SoundSettings>>({ enabled: true })
-  const [hapticsLoaded, setHapticsLoaded] = useState(false)
-  const [soundLoaded, setSoundLoaded] = useState(false)
+  const [hapticSettings, setHapticSettings] = useState<Partial<HapticSettings> | null>(null)
+  const [soundSettings, setSoundSettings] = useState<Partial<SoundSettings> | null>(null)
 
   useEffect(() => {
     AsyncStorage.getItem(HAPTIC_STORAGE_KEY)
       .then((stored) => {
-        if (stored !== null) setHapticSettings({ vibrate: stored === 'true' })
+        setHapticSettings({ vibrate: stored === null ? true : stored === 'true' })
       })
       .catch(() => {
-        // Corrupt/unavailable storage — keep the default { vibrate: true } already in state.
-      })
-      .finally(() => {
-        // Always resolves the splash gate below, even on a rejected read — otherwise a storage
-        // failure holds the splash screen up forever with no way to recover short of reinstalling.
-        setHapticsLoaded(true)
+        // Corrupt/unavailable storage — must still resolve this state, or FeedbackPressProvider
+        // below (gated on it, same reasoning as Theme.tsx/AutoPaperProvider) never mounts.
+        setHapticSettings({ vibrate: true })
       })
   }, [])
 
   useEffect(() => {
     AsyncStorage.getItem(SOUND_STORAGE_KEY)
       .then((stored) => {
-        if (stored !== null) setSoundSettings({ enabled: stored === 'true' })
+        setSoundSettings({ enabled: stored === null ? true : stored === 'true' })
       })
       .catch(() => {
-        // Corrupt/unavailable storage — keep the default { enabled: true } already in state.
-      })
-      .finally(() => {
-        setSoundLoaded(true)
+        setSoundSettings({ enabled: true })
       })
   }, [])
 
-  useSplashReady('haptics', hapticsLoaded)
-  useSplashReady('sound', soundLoaded)
+  // Loaded settings gate mounting FeedbackPressProvider entirely (rather than mounting it
+  // immediately with defaults and patching `initialValue`/`soundInitialValue` once the reads
+  // resolve): FeedbackPressProvider's own settings state is a lazy useState(() => ...) that only
+  // reads those props on its very first mount, so a changed prop on a later render is silently
+  // ignored — persistence would appear to work (this component's own state updates) while the
+  // live haptic/sound settings never actually pick it up. Mirrors Theme.tsx's own gating of
+  // AutoPaperProvider for the identical reason.
+  useSplashReady('haptics', hapticSettings !== null)
+  useSplashReady('sound', soundSettings !== null)
 
   // Generic UI feedback sounds, wired into every Button/IconButton/etc. in the package (see
   // useFeedbackHandlers' `fire`, which already gates these on the sound-enabled setting itself —
@@ -67,6 +66,8 @@ export function Feedback({ children }: Props) {
   const onSoundChange = useCallback((next: SoundSettings) => {
     AsyncStorage.setItem(SOUND_STORAGE_KEY, String(next.enabled)).catch(() => {})
   }, [])
+
+  if (!hapticSettings || !soundSettings) return null
 
   return (
     <FeedbackPressProvider initialValue={hapticSettings} onChange={onChange} soundInitialValue={soundSettings} onSoundChange={onSoundChange} paper={RNPaper} sound={{ selection: playSelection, notification: playNotification }}>

@@ -4,10 +4,15 @@ import { Direction, OrientationMode, Player } from '@/types'
 // deliberate flick-to-turn.
 export const MIN_SWIPE_DISTANCE = 24
 
-// Compares the magnitude of each axis at gesture end (not continuous tracking, per PLAN.md — this
-// is a flick-to-turn game, not drag-to-move) to pick the swipe's dominant axis, then the sign of
-// that axis for direction. Returns null for a drag too short to count as an intentional swipe.
+// Compares the magnitude of each axis of a translation vector to pick its dominant axis, then the
+// sign of that axis for direction. Returns null for a drag too short to count as an intentional
+// swipe. The vector doesn't have to span a whole gesture end-to-end — TouchInputLayer feeds this
+// per-segment deltas within one continuous touch (see its own comment) so a player can chain
+// several turns without lifting their finger, resetting the baseline after each recognized swipe.
+// Marked 'worklet' so it can run on the UI thread inside a Pan gesture's onUpdate, not just at
+// gesture end.
 export function resolveSwipeDirection(translationX: number, translationY: number): Direction | null {
+  'worklet'
   if (Math.abs(translationX) < MIN_SWIPE_DISTANCE && Math.abs(translationY) < MIN_SWIPE_DISTANCE) return null
 
   if (Math.abs(translationX) > Math.abs(translationY)) {
@@ -36,10 +41,14 @@ export interface ResolveTurnIntentParams {
   orientationMode: OrientationMode
 }
 
-// The one shared entry point every input source (mobile touch, web keyboard) should route through
-// — see PLAN.md's "Input Architecture". Mobile touch derives translationX/Y from a Pan gesture's
-// release; web keyboard calls this with a synthetic translation matching the pressed key's axis
-// (see TouchInputLayer.web.tsx) so both sources produce identically-shaped turn-intent events.
+// The one shared entry point every input source (mobile touch, web pointer/keyboard) should route
+// through — see PLAN.md's "Input Architecture". Mobile touch and web pointer both derive
+// translationX/Y from a per-segment delta within an ongoing drag (reset after each recognized
+// swipe, so several turns can chain within one continuous touch — see TouchInputLayer's onUpdate
+// and TouchInputLayer.web.tsx's pointermove handler); web keyboard calls this with a synthetic
+// translation matching the pressed key's axis, so all three sources produce identically-shaped
+// turn-intent events. Also marked 'worklet' (via resolveSwipeDirection) so native's UI-thread
+// gesture callback can call it directly.
 //
 // No flip for face-to-face's "far" player (player 2), even though they view the shared, un-rotated
 // board from the opposite physical side of the device: translationX/translationY are captured in
@@ -56,5 +65,6 @@ export interface ResolveTurnIntentParams {
 // already threads them through) in case a future accommodation genuinely needs them, but today
 // they don't affect the result.
 export function resolveTurnIntent({ translationX, translationY }: ResolveTurnIntentParams): Direction | null {
+  'worklet'
   return resolveSwipeDirection(translationX, translationY)
 }

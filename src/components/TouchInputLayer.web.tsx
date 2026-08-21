@@ -26,8 +26,12 @@ const KEY_SCHEME_KEYS: Record<KeyScheme, { up: string; down: string; left: strin
 
 interface TrackedPointer {
   player: Player
-  startX: number
-  startY: number
+  // Origin of the *current* segment (reset after each recognized swipe — see handlePointerMove)
+  // so a player can chain several turns within one continuous pointer-down, mirroring the native
+  // file's onUpdate-driven baseline reset.
+  baseX: number
+  baseY: number
+  lastDirection: Direction | null
 }
 
 export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, keyScheme }: TouchInputLayerProps) {
@@ -107,19 +111,31 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       for (const existing of pointers.values()) {
         if (existing.player === player) return
       }
-      pointers.set(e.pointerId, { player, startX: e.clientX, startY: e.clientY })
+      pointers.set(e.pointerId, { player, baseX: e.clientX, baseY: e.clientY, lastDirection: null })
     }
 
-    const handlePointerUp = (e: PointerEvent) => {
+    // Resolves a turn continuously as the pointer moves (mirrors the native file's onUpdate)
+    // instead of only at pointerup, so a player can chain several turns within one continuous
+    // pointer-down without lifting. Firing is gated on the direction actually changing from the
+    // last one recognized for this pointer, so holding a straight line doesn't repeat the same
+    // turn every MIN_SWIPE_DISTANCE px of movement.
+    const handlePointerMove = (e: PointerEvent) => {
       const tracked = pointers.get(e.pointerId)
-      pointers.delete(e.pointerId)
       if (!tracked) return
-      const direction = resolveTurnIntent({ player: tracked.player, translationX: e.clientX - tracked.startX, translationY: e.clientY - tracked.startY, orientationMode })
-      if (direction) {
+      const direction = resolveTurnIntent({ player: tracked.player, translationX: e.clientX - tracked.baseX, translationY: e.clientY - tracked.baseY, orientationMode })
+      if (!direction) return
+      tracked.baseX = e.clientX
+      tracked.baseY = e.clientY
+      if (direction !== tracked.lastDirection) {
+        tracked.lastDirection = direction
         onTurn(tracked.player, direction)
         playTurn()
         selection()
       }
+    }
+
+    const handlePointerUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId)
     }
 
     const handlePointerCancel = (e: PointerEvent) => {
@@ -138,10 +154,12 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
     document.body.style.overscrollBehaviorX = 'none'
 
     window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
     window.addEventListener('pointercancel', handlePointerCancel)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerCancel)
       document.body.style.touchAction = previousTouchAction
