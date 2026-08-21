@@ -13,7 +13,8 @@
     ],
     "updates": {
       "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD"
+      "checkAutomatically": "ON_LOAD",
+      "url": "https://u.expo.dev/f70e27f0-c61f-48e9-8ebd-2cf88c723873"
     },
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -35,7 +36,11 @@
       }
     },
     "android": {
-      "package": "com.jayrdeaton.lightcycles"
+      "package": "com.jayrdeaton.lightcycles",
+      "permissions": [
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -70,7 +75,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": ""
+        "projectId": "f70e27f0-c61f-48e9-8ebd-2cf88c723873"
       }
     },
     "owner": "jayrdeaton"
