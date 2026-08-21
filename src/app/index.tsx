@@ -4,6 +4,7 @@ import { router } from 'expo-router'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AnimatedHeroTitle } from '@/components/AnimatedHeroTitle'
 import { SettingsDialog } from '@/components/SettingsDialog'
@@ -20,6 +21,7 @@ export default function HomeScreen() {
   const { settings, setSettings } = useGameSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { colors, dark } = useAutoPaperTheme()
+  const insets = useSafeAreaInsets()
 
   // High-contrast retro look: literal black/white, flipped by appearance, rather than auto-paper's
   // own (slightly tinted) background role.
@@ -41,7 +43,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='cog' iconColor={fgMuted} size={24} style={styles.topRight} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       <AnimatedHeroTitle color={fg} p1Color={colors.primary} p2Color={colors.secondary} />
 

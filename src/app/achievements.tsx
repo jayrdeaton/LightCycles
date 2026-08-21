@@ -3,6 +3,7 @@ import { IconButton } from '@rific/feedback-press'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import { StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MONO_FONT } from '@/constants/fonts'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
@@ -12,13 +13,14 @@ export default function AchievementsScreen() {
   useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
 
   const { dark } = useAutoPaperTheme()
+  const insets = useSafeAreaInsets()
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={styles.back} onPress={safeBack} />
+      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
 
       <Text variant='displaySmall' style={[styles.title, { color: fg, fontFamily: MONO_FONT }]}>
         Achievements

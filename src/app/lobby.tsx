@@ -4,6 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LobbySharedControls } from '@/components/LobbySharedControls'
@@ -59,6 +60,7 @@ export default function LobbyScreen() {
 
   const { settings, setSettings, commitRoundSettings } = useGameSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const insets = useSafeAreaInsets()
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const { set: setThemeColor } = useThemeSettings()
   const p1Color = themeColors.primary
@@ -132,10 +134,10 @@ export default function LobbyScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={styles.back} onPress={safeBack} />
+      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
       {/* Same top-right slot as the title screen's own cog (index.tsx) — settings stays reachable
       from the same place whether a player opens it before or after picking a mode. */}
-      <IconButton icon='cog' iconColor={fgMuted} size={24} style={styles.topRight} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       {gameMode === 'twoPlayer' ? (
         isFaceToFace ? (
