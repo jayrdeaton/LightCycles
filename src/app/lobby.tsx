@@ -1,0 +1,222 @@
+import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
+import { IconButton } from '@rific/feedback-press'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
+import * as ScreenOrientation from 'expo-screen-orientation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { StyleSheet, View } from 'react-native'
+
+import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
+import { LobbySharedControls } from '@/components/LobbySharedControls'
+import { ReadyButton } from '@/components/ReadyButton'
+import { SettingsDialog } from '@/components/SettingsDialog'
+import { useGameSettings } from '@/hooks/useGameSettings'
+import { useOrientationLock } from '@/hooks/useOrientationLock'
+import { usePopoverHost } from '@/hooks/usePopoverHost'
+import { CpuDifficulty, GridSizeTier, KeyScheme, OrientationMode, Player, SpeedTier } from '@/types'
+import { humanPlayersFor, parseGameMode } from '@/utils/gameParams'
+import { safeBack } from '@/utils/navigation'
+
+// Small -> large vehicles, echoing the game's own light-cycle theme rather than a generic S/M/L
+// badge. MDI's name for the first is 'motorbike', not 'motorcycle'.
+const GRID_SIZE_OPTIONS: { value: GridSizeTier; label: string; icon: string }[] = [
+  { value: 'small', label: 'Small', icon: 'motorbike' },
+  { value: 'medium', label: 'Medium', icon: 'car' },
+  { value: 'large', label: 'Large', icon: 'train' }
+]
+
+const SPEED_OPTIONS: { value: SpeedTier; label: string; icon: string }[] = [
+  { value: 'slow', label: 'Slow', icon: 'snail' },
+  { value: 'normal', label: 'Normal', icon: 'tortoise' },
+  { value: 'fast', label: 'Fast', icon: 'rabbit' }
+]
+
+const ORIENTATION_OPTIONS: { value: OrientationMode; label: string; description: string; icon: string }[] = [
+  { value: 'faceToFace', label: 'Face-to-Face', description: 'Portrait top/bottom', icon: 'crop-portrait' },
+  { value: 'sideBySide', label: 'Side-by-Side', description: 'Landscape left/right', icon: 'crop-landscape' }
+]
+
+// Escalating expression, echoing the same playful-tier convention as grid size's vehicles and
+// speed's animals rather than a plain skill-level label.
+const CPU_DIFFICULTY_OPTIONS: { value: CpuDifficulty; label: string; icon: string }[] = [
+  { value: 'easy', label: 'Easy', icon: 'emoticon-happy-outline' },
+  { value: 'normal', label: 'Normal', icon: 'emoticon-neutral-outline' },
+  { value: 'hard', label: 'Hard', icon: 'emoticon-devil-outline' }
+]
+
+export default function LobbyScreen() {
+  // Both players read this screen right-side-up together while configuring — same reasoning as
+  // the title screen — regardless of the orientation mode being picked below for the match itself,
+  // which only takes effect once /game mounts its own lock. The *layout* below still visually
+  // splits/rotates per orientationMode; only the device's own physical rotation lock stays fixed.
+  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+
+  // Read only from this screen's own route param, never from useGameSettings().gameMode — the
+  // settings hook's AsyncStorage read is async, and racing it here could momentarily show the
+  // wrong number of player panels.
+  const params = useLocalSearchParams<{ gameMode: string }>()
+  const gameMode = useMemo(() => parseGameMode(params.gameMode), [params.gameMode])
+  const humanPlayers = useMemo(() => humanPlayersFor({ gameMode }), [gameMode])
+
+  const { settings, setSettings, commitRoundSettings } = useGameSettings()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { colors: themeColors, dark } = useAutoPaperTheme()
+  const { set: setThemeColor } = useThemeSettings()
+  const p1Color = themeColors.primary
+  const p2Color = themeColors.secondary
+
+  // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
+  // reachable at all when that slot's own picker allowed it (InlineColorPicker's allowSwapTaken:
+  // vs-CPU only, where the "other" color is just the CPU's, not a second real person's choice).
+  const handleP1ColorChange = useCallback(
+    (hex: string) => {
+      const nextP2 = hex.toLowerCase() === p2Color.toLowerCase() ? p1Color : p2Color
+      setThemeColor({ color: { primary: hex, secondary: nextP2, tertiary: getThirdColor(hex, nextP2) } })
+    },
+    [setThemeColor, p1Color, p2Color]
+  )
+  const handleP2ColorChange = useCallback(
+    (hex: string) => {
+      const nextP1 = hex.toLowerCase() === p1Color.toLowerCase() ? p2Color : p1Color
+      setThemeColor({ color: { primary: nextP1, secondary: hex, tertiary: getThirdColor(nextP1, hex) } })
+    },
+    [setThemeColor, p1Color, p2Color]
+  )
+
+  const [ready, setReady] = useState<Record<Player, boolean>>({ 1: false, 2: false })
+
+  // Every time this screen (re)gains focus — first arrival from the title screen, or coming back
+  // here via the post-game "Lobby" button — Ready starts false again. Without this, popping back to
+  // an already-mounted lobby whose players both left it Ready would immediately re-trigger the
+  // all-ready effect below and bounce straight back into /game.
+  useFocusEffect(
+    useCallback(() => {
+      setReady({ 1: false, 2: false })
+    }, [])
+  )
+
+  useEffect(() => {
+    if (!humanPlayers.every((p) => ready[p])) return
+    // `gameMode` here, not `settings.gameMode` — same race the comment above guards against:
+    // this screen's own route param is the trustworthy value, not the settings hook's own
+    // (possibly still-loading) copy.
+    commitRoundSettings({ ...settings, gameMode })
+    router.push('/game')
+  }, [ready, humanPlayers, settings, gameMode, commitRoundSettings])
+
+  const bg = dark ? '#000000' : '#FFFFFF'
+  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
+
+  const p2IsHuman = humanPlayers.includes(2)
+  const isFaceToFace = settings.orientationMode === 'faceToFace'
+
+  // Vs-CPU only has one human slot, so its Ready toggle renders standalone below both panels
+  // instead of embedded in P1's own panel — see the solo layout below.
+  const showReadyButton = gameMode === 'twoPlayer'
+  // P1's own panel and the shared (not player-specific) controls row always share one host —
+  // mutually exclusive regardless of game mode, since both sit in the same near/bottom zone and
+  // visually collide if left independent (a second popover can open right on top of the first).
+  // Vs-CPU additionally folds P2/CPU's panel into this same host: only one human is ever driving
+  // both slots there, so having both YOU's and CPU's popovers open at once is just visual clutter,
+  // not a useful simultaneous-edit case. Two-player mode keeps P2 on its own independent host,
+  // since two real people editing at once is the whole point there.
+  const controlsHost = usePopoverHost()
+  const sharedHost = gameMode === 'vsCpu' ? controlsHost : undefined
+  // P2 sits at (or near) the screen's right edge in every layout except face-to-face's centered
+  // top zone (where align is inconsequential either way, since a rotated, centered trigger has
+  // roughly equal room on both sides) — 'right' avoids the same off-screen overflow the shared
+  // orientation dropdown had.
+  const p1Panel = <LobbyPlayerPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman keyScheme={settings.keyScheme[1]} onKeySchemeChange={(scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 1: scheme } })} otherKeyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} />
+  const p2Panel = <LobbyPlayerPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} onKeySchemeChange={p2IsHuman ? (scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 2: scheme } }) : undefined} otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} align='right' />
+
+  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} orientationMode={gameMode === 'twoPlayer' ? settings.orientationMode : undefined} orientationOptions={gameMode === 'twoPlayer' ? ORIENTATION_OPTIONS : undefined} onOrientationChange={gameMode === 'twoPlayer' ? (value) => setSettings({ orientationMode: value }) : undefined} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
+
+  return (
+    <View style={[styles.container, { backgroundColor: bg }]}>
+      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={styles.back} onPress={safeBack} />
+      {/* Same top-right slot as the title screen's own cog (index.tsx) — settings stays reachable
+      from the same place whether a player opens it before or after picking a mode. */}
+      <IconButton icon='cog' iconColor={fgMuted} size={24} style={styles.topRight} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+
+      {gameMode === 'twoPlayer' ? (
+        isFaceToFace ? (
+          // Player 1 is assumed to be the device's owner, so the near/bottom zone (unrotated)
+          // faces them; player 2 is the "far" player (see turnIntent.ts's own flip convention), so
+          // their zone is rotated 180° to face them from the opposite side of the device — a
+          // shared title above both would only ever read right-side-up for one of them, so there
+          // isn't one here.
+          <View style={styles.dualZone}>
+            <View style={styles.rotated180}>{p2Panel}</View>
+            {sharedControls}
+            {p1Panel}
+          </View>
+        ) : (
+          // Side-by-side: both players sit upright next to each other, so the shared controls sit
+          // in their own row above, rather than squeezed into the narrow column between them.
+          <View style={styles.stackedZone}>
+            {sharedControls}
+            <View style={styles.playersRow}>
+              {p1Panel}
+              {p2Panel}
+            </View>
+          </View>
+        )
+      ) : (
+        <View style={styles.stackedZone}>
+          {sharedControls}
+          {/* See IconDropdown's anchorOpen comment — the standalone Ready button below is a later
+          sibling of this row, so a popover escaping it (from either panel, since both share
+          controlsHost) needs the row itself elevated to paint above that Ready button. Checking
+          for a "p1-"/"p2-" id specifically, not just "is anything open on the host" — sharedControls
+          also shares this host, and elevating this row for *its* popovers too would tie the two,
+          letting DOM order wrongly decide which one paints on top (see LobbyPlayerPanel and
+          LobbySharedControls' matching ownPopoverOpen checks). */}
+          <View style={[styles.playersRow, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen]}>
+            {p1Panel}
+            {p2Panel}
+          </View>
+          <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} />
+        </View>
+      )}
+
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} settings={settings} setSettings={setSettings} />
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  back: {
+    left: 8,
+    position: 'absolute',
+    top: 8
+  },
+  container: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 16
+  },
+  dualZone: {
+    alignItems: 'center',
+    gap: 28
+  },
+  playersRow: {
+    flexDirection: 'row',
+    gap: 40
+  },
+  playersRowOpen: {
+    zIndex: 100
+  },
+  rotated180: {
+    transform: [{ rotate: '180deg' }]
+  },
+  stackedZone: {
+    alignItems: 'center',
+    gap: 28
+  },
+  topRight: {
+    position: 'absolute',
+    right: 8,
+    top: 8
+  }
+})
