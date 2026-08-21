@@ -15,6 +15,7 @@ import { BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS } from '@/constan
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
+import { useManualLandscape } from '@/hooks/useManualLandscape'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { GameSettings, Player, RoundOutcome } from '@/types'
 import { humanPlayersFor } from '@/utils/gameParams'
@@ -203,9 +204,15 @@ export default function GameScreen() {
     if (!settings) router.replace('/')
   }, [settings])
 
-  useOrientationLock(settings?.orientationMode === 'sideBySide' ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP)
+  // Native orientation stays portrait-locked everywhere, on purpose (matching every other screen's
+  // own PORTRAIT_UP lock) — sideBySide's landscape layout below is faked with a manual rotation
+  // transform (see useManualLandscape) rather than an actual OS rotation.
+  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
 
-  const insets = useSafeAreaInsets()
+  const portraitInsets = useSafeAreaInsets()
+  const manualLandscape = useManualLandscape()
+  const isSideBySide = settings?.orientationMode === 'sideBySide'
+  const insets = isSideBySide ? manualLandscape.insets : portraitInsets
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const colors = useMemo<Record<Player, string>>(() => ({ 1: themeColors.primary, 2: themeColors.secondary }), [themeColors.primary, themeColors.secondary])
 
@@ -229,11 +236,18 @@ export default function GameScreen() {
 
   if (!settings) return null
 
+  const board = (
+    <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
+      {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} />}
+    </View>
+  )
+
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
-      <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
-        {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} />}
-      </View>
+      {/* Side-by-side fakes landscape by rotating the whole board area 90° within a swapped-
+      dimension box (see useManualLandscape) rather than an actual OS rotation — face-to-face's
+      board sits straight in the (real, portrait) root with no such wrapper. */}
+      {isSideBySide ? <View style={manualLandscape.rotatedContainerStyle}>{board}</View> : board}
     </View>
   )
 }
