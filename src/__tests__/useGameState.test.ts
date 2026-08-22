@@ -64,8 +64,12 @@ describe('useGameState', () => {
   })
 
   it('keeps a laggy trailGrowthTier shorter than the classic tier over the same run', async () => {
-    const { result: classic } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS, ORIENTATION, P1_ON_RIGHT))
-    const { result: fast } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, trailGrowthTier: 'fast' }, COLORS, ORIENTATION, P1_ON_RIGHT))
+    // A much bigger board than the other tests here use — this one needs enough runway that
+    // neither player reaches a wall (ending the round) before there's been time to both clear
+    // MIN_TRAIL_LENGTH_BEFORE_TRIM's grace period (gameEngine.ts — below that length every tier
+    // just grows like 'static') and show a real difference afterward.
+    const { result: classic } = await renderHook(() => useGameState(2000, 2000, SETTINGS, COLORS, ORIENTATION, P1_ON_RIGHT))
+    const { result: fast } = await renderHook(() => useGameState(2000, 2000, { ...SETTINGS, trailGrowthTier: 'fast' }, COLORS, ORIENTATION, P1_ON_RIGHT))
 
     await act(async () => {
       classic.current.beginPlaying()
@@ -73,9 +77,11 @@ describe('useGameState', () => {
     })
 
     await act(async () => {
-      jest.advanceTimersByTime(1000)
+      jest.advanceTimersByTime(3000)
     })
 
+    expect(classic.current.state.phase).toBe('playing')
+    expect(fast.current.state.phase).toBe('playing')
     expect(fast.current.state.players[1].trail.length).toBeLessThan(classic.current.state.players[1].trail.length)
   })
 

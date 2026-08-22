@@ -36,10 +36,10 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
   const { colors } = useAutoPaperTheme()
   const { settings: hapticSettings, set: setHapticSettings } = useHapticSettings()
   const { settings: soundSettings, set: setSoundSettings } = useSoundSettings()
-  // autoCheck: false — the root layout (_layout.tsx) already runs the silent background check via
-  // its own useUpdater() instance; a second instance with autoCheck's default (true) would set up
-  // a second AppState listener and double every foreground-resume update check. This instance only
-  // ever checks on an explicit tap of the button below.
+  // autoCheck: false — the root layout (_layout.tsx) already runs the background check via its own
+  // useUpdater() instance; a second instance with autoCheck's default (true) would set up a second
+  // AppState listener and double every foreground-resume update check. This instance only ever
+  // checks on an explicit tap of the button below.
   const { check, checking, updateReady } = useUpdater({ autoCheck: false, autoPrompt: false })
 
   return (

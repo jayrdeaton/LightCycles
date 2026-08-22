@@ -1,4 +1,4 @@
-import { GRID_CELL_PX, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { GRID_CELL_PX, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { GameState, GridCell, PlayerState } from '@/types'
 import { applyActivation, applyTurnIntent, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
@@ -221,9 +221,22 @@ describe('tickGame', () => {
     for (let i = 0; i < 8; i++) {
       state = tickGame(state, undefined, 0.5)
     }
-    // 8 ticks at a 0.5 growth rate: 4 trims, net length = 1 (start) + 8 (appends) - 4 (trims) = 5.
-    expect(state.players[1].trail).toHaveLength(5)
-    expect(state.players[2].trail).toHaveLength(5)
+    // 8 ticks at a 0.5 growth rate nominally trims on ticks 2, 4, 6, 8 — but the first two land
+    // while the trail is still at/under MIN_TRAIL_LENGTH_BEFORE_TRIM (5) and get skipped (see the
+    // grace-period test below), so only 2 of the 4 nominally-due trims actually apply: net length =
+    // 1 (start) + 8 (appends) - 2 (trims actually applied) = 7.
+    expect(state.players[1].trail).toHaveLength(7)
+    expect(state.players[2].trail).toHaveLength(7)
+  })
+
+  it('never trims below MIN_TRAIL_LENGTH_BEFORE_TRIM, regardless of how low trailGrowthRate is', () => {
+    let state = makeParallelState()
+    // A rate this low would nominally trim on almost every tick — the trail should still just grow
+    // like the untrimmed default (one cell per tick, no trims at all) until it clears the minimum.
+    for (let i = 0; i < MIN_TRAIL_LENGTH_BEFORE_TRIM - 1; i++) {
+      state = tickGame(state, undefined, 0.1)
+      expect(state.players[1].trail).toHaveLength(i + 2)
+    }
   })
 
   it('never trims on the tick a player crashes, even under a sub-1 trailGrowthRate', () => {
@@ -345,11 +358,25 @@ describe('tickGame', () => {
       ])
     })
 
-    it('does not protect against a head-on collision', () => {
+    it('wins a head-on outright when only one side is shielded, consuming that shield', () => {
       const state = makeState({
         players: {
           1: ps({ trail: [{ x: 4, y: 5 }], direction: 'right', color: '#3B82F6', effects: { speed: null, control: null, shield: { expiresAtTick: 100 } } }),
           2: ps({ trail: [{ x: 6, y: 5 }], direction: 'left', color: '#EF4444' })
+        }
+      })
+      const next = tickGame(state)
+      expect(next.outcome).toEqual({ type: 'win', winner: 1 })
+      expect(next.players[1].alive).toBe(true)
+      expect(next.players[1].effects.shield).toBeNull()
+      expect(next.players[2].alive).toBe(false)
+    })
+
+    it('still calls a head-on a draw when both sides are shielded', () => {
+      const state = makeState({
+        players: {
+          1: ps({ trail: [{ x: 4, y: 5 }], direction: 'right', color: '#3B82F6', effects: { speed: null, control: null, shield: { expiresAtTick: 100 } } }),
+          2: ps({ trail: [{ x: 6, y: 5 }], direction: 'left', color: '#EF4444', effects: { speed: null, control: null, shield: { expiresAtTick: 100 } } })
         }
       })
       const next = tickGame(state)

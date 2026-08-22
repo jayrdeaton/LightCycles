@@ -1,4 +1,4 @@
-import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
+import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_HACK_COMPENSATION_CHANCE, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
 import { CpuDifficulty, Direction, GameState, GridCell, GridSize, Player, PlayerState, PowerupPickup, PowerupType } from '@/types'
 
 import { countReachableCells, distanceToNearestTarget } from './floodFill'
@@ -107,12 +107,31 @@ export function chooseCpuDirection({ player, grid, occupied, difficulty, random 
   return best
 }
 
+// Whether the CPU "notices" it's currently Hack'd and steers to compensate this tick — difficulty
+// gates how often, not whether it's even capable of it (see CPU_HACK_COMPENSATION_CHANCE's own
+// comment: this is a decision-quality knob, same as every other difficulty-gated choice here, not
+// a reaction-speed one). Chances of exactly 0 or 1 skip the random() call entirely, so 'easy'/'hard'
+// never consume an extra roll a test wouldn't expect.
+function shouldCompensateForHack(difficulty: CpuDifficulty, random: () => number): boolean {
+  const chance = CPU_HACK_COMPENSATION_CHANCE[difficulty]
+  if (chance <= 0) return false
+  if (chance >= 1) return true
+  return random() < chance
+}
+
 // Queues the CPU's chosen turn the same way a human input source would (see turnIntent.ts) —
 // applyTurnIntent still owns the actual reversal/no-op/phase/alive guards, so the bot can't bypass
-// those rules just by going through a different call site than human input does. Hack's steering
-// inversion is applied to the CPU's own *chosen* direction, right before it's queued, the same way
-// every human input source applies it at its own single chokepoint (see applyControlInversion) —
-// chooseCpuDirection itself always reasons about the true best direction, uninverted.
+// those rules just by going through a different call site than human input does.
+//
+// chooseCpuDirection always reasons about the true best direction, uninverted — it has no idea
+// whether it's currently Hack'd. Left uncorrected, blindly applying Hack's flip on top of that
+// choice (the same way a human's own swipe gets flipped) reliably steers the CPU into a wall
+// whenever the actual best escape happens to be lateral — a free kill, not an earned one. So
+// whether the CPU compensates is decided first (see shouldCompensateForHack): if it does, the flip
+// is skipped entirely (the two inversions — its own deliberate counter-steer and the automatic one
+// applyControlInversion would otherwise apply — would just cancel out, so there's nothing to
+// actually invert); if it doesn't "notice," the flip lands exactly as it would against unaware
+// human input.
 //
 // `occupied` defaults to a fresh build from `state.players`, same reasoning as tickGame's own
 // default in gameEngine.ts — useGameState.ts builds one set per tick and passes it to both this
@@ -123,7 +142,9 @@ export function applyCpuTurn(state: GameState, difficulty: CpuDifficulty, occupi
   if (!player.alive) return state
 
   const rawDirection = chooseCpuDirection({ player, grid: state.grid, occupied, difficulty, random, ownSteps: stepsFor(player.effects), pickups: state.pickups, heldPowerup: player.heldPowerup })
-  const direction = applyControlInversion(rawDirection, player.effects.control?.type === 'hack')
+  const hacked = player.effects.control?.type === 'hack'
+  const compensates = hacked && shouldCompensateForHack(difficulty, random ?? Math.random)
+  const direction = hacked && !compensates ? applyControlInversion(rawDirection, true) : rawDirection
   return applyTurnIntent(state, CPU_PLAYER, direction)
 }
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Easing, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx } from '@/constants/game'
+import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, PowerupPickup } from '@/types'
 import { cellToPixel } from '@/utils/grid'
 
@@ -169,8 +169,12 @@ function Walls({ grid, cellPx, orientationMode, p1OnRight, players, phase }: { g
 // this just fills in what the trim looks like *between* ticks instead of holding still until it
 // does. Without it, every tick that doesn't land on a whole trim left the tail dead still, then
 // jumped a full cell on the tick that did — a held-then-hop cadence, not a following one.
-function tailProgress(tick: number, growthRate: number): number {
-  if (growthRate >= 1) return 0
+// `trailLength` mirrors gameEngine.ts's own MIN_TRAIL_LENGTH_BEFORE_TRIM gate on the trim itself —
+// without it this would compute a nonzero creep purely from elapsed ticks even during the grace
+// period where the trail isn't actually being trimmed yet, visually detaching the tail from
+// trail[0] before any cell has really been removed.
+function tailProgress(tick: number, growthRate: number, trailLength: number): number {
+  if (growthRate >= 1 || trailLength <= MIN_TRAIL_LENGTH_BEFORE_TRIM) return 0
   const fractionalTrims = tick * (1 - growthRate)
   return fractionalTrims - Math.floor(fractionalTrims)
 }
@@ -207,7 +211,7 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   // Continuously interpolated toward nextCenter (see tailProgress) rather than snapping straight to
   // `tail` — the fractional creep between trims, not just the trims themselves, is what needs to
   // animate for the tail to read as *following* rather than holding still and then hopping.
-  const progress = tailProgress(tick, trailGrowthRate)
+  const progress = tailProgress(tick, trailGrowthRate, trail.length)
   const tailTarget = { x: tail.x + (nextCenter.x - tail.x) * progress, y: tail.y + (nextCenter.y - tail.y) * progress }
 
   // The game state advances in discrete grid steps (see gameEngine.ts) — snapping straight to
@@ -315,7 +319,13 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
         <>
           <Path path={settledPath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} />
           <Line p1={tailEdgeStart} p2={tailEdgeEnd} strokeWidth={trailWidth} strokeCap='round' color={player.color} />
-          <Line p1={edgeStart} p2={edgeEnd} strokeWidth={trailWidth} strokeCap='round' color={player.color} />
+          {/* Skipped once the tail's own segment already reaches the head (trail.length <= 2 —
+          see tailEdgeEnd's comment): edgeStart is a snapshot of the head's own glide a moment
+          ago, updated on its own schedule, unrelated to tailAnimX's — the two segments could
+          each be "correct" on their own terms and still not meet exactly, leaving a visible gap
+          between them right where the trail is shortest. There's nothing for this segment to add
+          once the tail segment already spans tail-to-head on its own. */}
+          {trail.length > 2 && <Line p1={edgeStart} p2={edgeEnd} strokeWidth={trailWidth} strokeCap='round' color={player.color} />}
           <Circle cx={animX} cy={animY} r={headRadius} color={player.color} />
           <Circle cx={animX} cy={animY} r={headRadius} style='stroke' strokeWidth={1.5} color={getContrastColor(player.color)} />
           {/* Active-effect "tell" rings, nested at increasing radii so more than one at once

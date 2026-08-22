@@ -1,4 +1,4 @@
-import { POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { ControlEffect, Direction, GameState, GridCell, GridSize, OrientationMode, Player, PlayerEffects, PlayerState, PowerupPickup, PowerupType, RoundOutcome, ShieldEffect, SpeedEffect } from '@/types'
 
 import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell } from './grid'
@@ -249,10 +249,7 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
     const next1 = stepping1 ? stepCell(head1, dir1) : null
     const next2 = stepping2 ? stepCell(head2, dir2) : null
 
-    // Both cycles moving into the same cell on the same sub-step — a head-on collision — counts as
-    // a crash for both, regardless of whether that cell was otherwise free, and is never negated by
-    // a Shield (see this feature's own Decided Defaults — a head-on is a live clash between two
-    // moving objects, not a static wall to break through).
+    // Both cycles moving into the same cell on the same sub-step — a head-on collision.
     const headOn = stepping1 && stepping2 && next1!.x === next2!.x && next1!.y === next2!.y
     const oob1 = stepping1 && !isInBounds(next1!, grid)
     const oob2 = stepping2 && !isInBounds(next2!, grid)
@@ -262,11 +259,23 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
 
     const shield1Active = effects1.shield !== null && tick <= effects1.shield.expiresAtTick
     const shield2Active = effects2.shield !== null && tick <= effects2.shield.expiresAtTick
-    const negated1 = rawHit1 && shield1Active
-    const negated2 = rawHit2 && shield2Active
 
-    const stepCrash1 = stepping1 && (headOn || oob1 || (rawHit1 && !negated1))
-    const stepCrash2 = stepping2 && (headOn || oob2 || (rawHit2 && !negated2))
+    // A head-on is negated for a player only when THEY'RE shielded and the other one ISN'T — an
+    // exactly-one-sided shield wins the head-on outright (a real, if rare, "clutch" moment) rather
+    // than the usual mutual crash/draw; both or neither shielded stays an ordinary head-on for
+    // both. The shield is consumed here, immediately, rather than through the wall-break path
+    // below — the loser of a head-on always crashes this same sub-step, so that path (which only
+    // runs once BOTH sides have avoided crashing) is never reached for this case.
+    const headOnSurvives1 = headOn && shield1Active && !shield2Active
+    const headOnSurvives2 = headOn && shield2Active && !shield1Active
+    if (headOnSurvives1) effects1 = { ...effects1, shield: null }
+    if (headOnSurvives2) effects2 = { ...effects2, shield: null }
+
+    const wallNegated1 = rawHit1 && shield1Active
+    const wallNegated2 = rawHit2 && shield2Active
+
+    const stepCrash1 = stepping1 && ((headOn && !headOnSurvives1) || oob1 || (rawHit1 && !wallNegated1))
+    const stepCrash2 = stepping2 && ((headOn && !headOnSurvives2) || oob2 || (rawHit2 && !wallNegated2))
 
     if (stepCrash1 || stepCrash2) {
       crash1 = stepCrash1
@@ -278,19 +287,19 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
       break
     }
 
-    // Shield breaks — consume the shield and destroy the broken trail back to (not including) the
-    // break point, before committing this sub-step's moves. Applied by CELL, not a precomputed
-    // index, so two shielded breaks landing on the same trail in the same sub-step (a rare but
-    // possible edge case) compose correctly regardless of order — each lookup re-finds its own
-    // cell in whatever the trail currently is, rather than risking a stale index into an
-    // already-shortened array.
-    if (negated1) {
+    // Shield breaks (wall case — see above for head-on) — consume the shield and destroy the
+    // broken trail back to (not including) the break point, before committing this sub-step's
+    // moves. Applied by CELL, not a precomputed index, so two shielded breaks landing on the same
+    // trail in the same sub-step (a rare but possible edge case) compose correctly regardless of
+    // order — each lookup re-finds its own cell in whatever the trail currently is, rather than
+    // risking a stale index into an already-shortened array.
+    if (wallNegated1) {
       effects1 = { ...effects1, shield: null }
       const owner = locateOccupyingTrail(next1!, trail1, trail2)
       if (owner === 1) trail1 = trimTrailAtCell(trail1, next1!)
       else if (owner === 2) trail2 = trimTrailAtCell(trail2, next1!)
     }
-    if (negated2) {
+    if (wallNegated2) {
       effects2 = { ...effects2, shield: null }
       const owner = locateOccupyingTrail(next2!, trail1, trail2)
       if (owner === 1) trail1 = trimTrailAtCell(trail1, next2!)
@@ -356,10 +365,12 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
   }
 
   // Periodic trailGrowthTier trim — gated per-player on whether that player actually moved this
-  // tick. A Stasis'd (0-step) player's trail is fully frozen: no append, no trim, for the duration.
+  // tick (a Stasis'd, 0-step player's trail is fully frozen: no append, no trim, for the duration)
+  // and on having grown past MIN_TRAIL_LENGTH_BEFORE_TRIM — every tier just grows like 'static'
+  // until then, so a round doesn't start trimming a trail that's barely begun.
   const trimDue = shouldTrimTrailAt(tick, trailGrowthRate)
-  if (trimDue && steps1 > 0) trail1 = trimTrailFront(trail1, 1)
-  if (trimDue && steps2 > 0) trail2 = trimTrailFront(trail2, 1)
+  if (trimDue && steps1 > 0 && trail1.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail1 = trimTrailFront(trail1, 1)
+  if (trimDue && steps2 > 0 && trail2.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail2 = trimTrailFront(trail2, 1)
 
   const spawnedPickups = maybeSpawnPickup(grid, tick, pickups, working, enabledPowerups, random)
 

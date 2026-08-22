@@ -157,14 +157,41 @@ describe('applyCpuTurn', () => {
     expect(applyCpuTurn(state, 'hard')).toBe(state)
   })
 
-  it('inverts its own chosen direction while Hacked', () => {
-    // Same fixture as the very first chooseCpuDirection test: uninverted, the CPU (as player 2)
-    // would choose 'right'. Hacked, it should queue 'left' instead.
-    const state = baseState()
-    state.players[2] = { ...state.players[2], trail: [{ x: 3, y: 0 }], direction: 'up', effects: { speed: null, control: { type: 'hack', expiresAtTick: 100 }, shield: null } }
-    const occupied = new Set(['3,0', '1,0'])
-    const next = applyCpuTurn({ ...state, grid: { cols: 8, rows: 1 } }, 'hard', occupied)
-    expect(next.players[2].pendingDirection).toBe('left')
+  describe('Hack compensation', () => {
+    // Same fixture as the very first chooseCpuDirection test in every case below: uninverted, the
+    // CPU (as player 2) would choose 'right'.
+    function hackedState(): { state: GameState; occupied: Set<string> } {
+      const state = baseState()
+      state.players[2] = { ...state.players[2], trail: [{ x: 3, y: 0 }], direction: 'up', effects: { speed: null, control: { type: 'hack', expiresAtTick: 100 }, shield: null } }
+      return { state: { ...state, grid: { cols: 8, rows: 1 } }, occupied: new Set(['3,0', '1,0']) }
+    }
+
+    it('never compensates at easy difficulty — still inverts its own chosen direction', () => {
+      const { state, occupied } = hackedState()
+      // random() >= CPU_EASY_RANDOM_CHANCE keeps chooseCpuDirection's own easy-tier randomness
+      // from picking something other than its score-based best ('right'), so this stays a direct
+      // test of the hack-inversion path, not easy's separate weak-play randomness.
+      const next = applyCpuTurn(state, 'easy', occupied, () => 0.99)
+      expect(next.players[2].pendingDirection).toBe('left')
+    })
+
+    it('always compensates at hard difficulty, queuing the true best direction despite being Hacked', () => {
+      const { state, occupied } = hackedState()
+      const next = applyCpuTurn(state, 'hard', occupied)
+      expect(next.players[2].pendingDirection).toBe('right')
+    })
+
+    it('at normal difficulty, compensates only when the random roll succeeds', () => {
+      const { state, occupied } = hackedState()
+      // Both values stay under CPU_NORMAL_SUBOPTIMAL_CHANCE's own roll inside chooseCpuDirection
+      // (so it still picks the score-based best, 'right') while landing on opposite sides of
+      // CPU_HACK_COMPENSATION_CHANCE.normal's 0.6 threshold for the separate compensation roll.
+      const compensates = applyCpuTurn(state, 'normal', occupied, () => 0.3)
+      expect(compensates.players[2].pendingDirection).toBe('right')
+
+      const doesNotCompensate = applyCpuTurn(state, 'normal', occupied, () => 0.9)
+      expect(doesNotCompensate.players[2].pendingDirection).toBe('left')
+    })
   })
 })
 

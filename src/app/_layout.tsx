@@ -9,9 +9,7 @@ import { Theme } from '@/components/Theme'
 import { GameSettingsProvider } from '@/hooks/useGameSettings'
 
 export default function RootLayout() {
-  // Silent background staging: a pass-and-play session shouldn't get an update dialog
-  // interrupting a round. Settings exposes a manual "Check for Updates" button instead.
-  useUpdater({ autoPrompt: false })
+  useUpdater()
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

@@ -47,6 +47,17 @@ export const TRAIL_GROWTH_RATE: Record<TrailGrowthTier, number> = {
   static: 1
 }
 
+// Below this length, a non-'static' tier still just grows every tick — trimming (see
+// shouldTrimTrailAt) doesn't kick in until the trail's reached this many cells. Trims skipped
+// during this grace period aren't caught up later; the round just starts a handful of ticks ahead
+// of where the nominal rate alone would put it, which is the whole point. Without it, the trail
+// spends its first few ticks at 1-2 cells regardless of tier — long enough for a 'fast' round to
+// visibly start trimming before there's anything meaningful to trim, which is what actually read as
+// "weird" at the very beginning: not a rendering bug on its own, just tuning the mechanic to stay
+// out of the regime that triggers those edge cases in the first place (see GameBoard.tsx's
+// tailEdgeEnd/edgeStart comments for what happens in it).
+export const MIN_TRAIL_LENGTH_BEFORE_TRIM = 5
+
 // Rescales a ms value tuned at GRID_CELL_PX.medium to the active cell size, preserving on-screen
 // px/sec pace: ms/tick scales linearly with px/tick (== cellPx), so px/sec cancels out to a
 // constant regardless of which grid-size tier is active.
@@ -216,3 +227,16 @@ export const POWERUP_CPU_OVERDRIVE_MIN_SPACE = 60 // "coast is clear" — floor 
 export const POWERUP_CPU_PRUNE_SPACE_THRESHOLD = 20 // use held Prune when maneuvering room is getting tight
 export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock
 export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock anyway, so 'normal'/'hard' don't hoard forever
+
+// Per-tick chance the CPU "notices" it's currently Hack'd and steers to compensate — reasoning
+// about the true best direction as always (see cpuAi.ts's chooseCpuDirection, which never itself
+// knows about the inversion), then pre-inverting its own output so the automatic Hack flip cancels
+// out and the correct direction still lands. Without this, a hacked CPU blindly applies the flip on
+// top of its own genuinely-best choice, which reliably steers it into a wall whenever the correct
+// escape happens to be lateral — a free kill rather than a real advantage earned by outplaying it.
+// 'hard' always compensates (decision quality, not reaction speed, is what difficulty already
+// models here — see chooseCpuDirection's own comment), so Hack stops being a steering handicap
+// against it specifically, same as a genuinely sharp human opponent would shrug it off; 'normal'
+// sometimes still gets caught out; 'easy' never adapts, same as its existing, deliberately weaker
+// tier.
+export const CPU_HACK_COMPENSATION_CHANCE: Record<CpuDifficulty, number> = { easy: 0, normal: 0.6, hard: 1 }
