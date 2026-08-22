@@ -6,7 +6,7 @@ import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { resolveTurnIntent } from '@/utils/turnIntent'
+import { applyControlInversion, resolveTurnIntent } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -17,6 +17,13 @@ export interface TouchInputLayerProps {
   humanPlayers: Player[]
   enabled: boolean
   onTurn: (player: Player, direction: Direction) => void
+  // Fires the player's held powerup — see the per-player Pan's own onEnd below for how a tap (a
+  // touch that never crossed the swipe threshold) is told apart from a drag-to-steer.
+  onActivate: (player: Player) => void
+  // Whether Hack currently has this player's steering inverted — applied here, at the single
+  // JS-thread chokepoint every recognized turn already flows through (handleTurn), not inside the
+  // UI-thread gesture worklet itself.
+  controlInverted: Record<Player, boolean>
   // Web-only (see TouchInputLayer.web.tsx) — kept on the shared prop shape but unused here, same as
   // this file's own asymmetric use of humanPlayers relative to the web version.
   keyScheme: Record<Player, KeyScheme>
@@ -29,7 +36,7 @@ export interface TouchInputLayerProps {
 // testing against that region, using each touch's start coordinate, IS the "classify by start
 // coordinate, not continuous tracking" the plan calls for; there's no extra manual classification
 // to write. The canvas underneath stays one undivided render — only touch handling is zoned.
-export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlayers, enabled, onTurn }: TouchInputLayerProps) {
+export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlayers, enabled, onTurn, onActivate, controlInverted }: TouchInputLayerProps) {
   const [size, setSize] = useState({ width: 0, height: 0 })
   const solo = humanPlayers.length === 1
 
@@ -39,15 +46,25 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
   }, [])
 
   const playTurn = useGameSound(require('../../assets/sounds/turn.wav'), { poolSize: 8 })
+  const playActivate = useGameSound(require('../../assets/sounds/select.wav'), { poolSize: 4 })
   const { selection } = useVibration()
 
   const handleTurn = useCallback(
     (player: Player, direction: Direction) => {
-      onTurn(player, direction)
+      onTurn(player, applyControlInversion(direction, controlInverted[player]))
       playTurn()
       selection()
     },
-    [onTurn, playTurn, selection]
+    [onTurn, controlInverted, playTurn, selection]
+  )
+
+  const handleActivate = useCallback(
+    (player: Player) => {
+      onActivate(player)
+      playActivate()
+      selection()
+    },
+    [onActivate, playActivate, selection]
   )
 
   // Per-player drag state, read/written from the UI-thread gesture worklets below (never touched
@@ -97,6 +114,13 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
             runOnJS(handleTurn)(player, direction)
           }
         })
+        // A touch that never crosses MIN_SWIPE_DISTANCE never sets lastDirection above (see
+        // resolveTurnIntent) — today, that's a complete no-op; here, it's the free gesture space a
+        // tap-to-activate uses. Firing on release (not on start) is what tells a genuine tap apart
+        // from the very first moment of a drag that simply hasn't crossed the threshold yet.
+        .onEnd(() => {
+          if (lastDirection.value === null) runOnJS(handleActivate)(player)
+        })
 
     if (solo) return makePlayerPan(humanPlayers[0], baseFor(humanPlayers[0]), lastDirectionFor(humanPlayers[0]), {})
 
@@ -111,7 +135,7 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
 
     return Gesture.Simultaneous(p1Pan, p2Pan)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- p1Base/p2Base/p1LastDirection/p2LastDirection are stable SharedValue refs (like useRef), not reactive state
-  }, [size, orientationMode, p1OnRight, humanPlayers, solo, enabled, handleTurn])
+  }, [size, orientationMode, p1OnRight, humanPlayers, solo, enabled, handleTurn, handleActivate])
 
   if (!gesture) {
     return <View style={StyleSheet.absoluteFill} onLayout={onLayout} />

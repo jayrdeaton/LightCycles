@@ -27,6 +27,50 @@ export type GamePhase = 'onboarding' | 'playing' | 'roundOver'
 
 export type RoundOutcome = { type: 'win'; winner: Player } | { type: 'draw' }
 
+// Overdrive/Stasis are self-targeted speed effects (2x/0x); Overclock is the same 2x speed effect
+// but opponent-targeted (see gameEngine.ts's applyActivation) — kept as its own literal (not
+// merged into Overdrive) so a boosted head can be told apart as "helping you" vs "done to you" for
+// the on-board tell and CPU reasoning, even though the multiplier is identical.
+export type PowerupType = 'overdrive' | 'stasis' | 'shield' | 'prune' | 'hack' | 'overclock'
+
+export interface SpeedEffect {
+  type: 'overdrive' | 'stasis' | 'overclock'
+  multiplier: 0 | 2
+  // Absolute tick number this effect is in force through — tick-based (not a wall-clock
+  // timestamp) to match the deterministic pure-tick model everything else here uses (see
+  // shouldTrimTrailAt). Computed once at activation as `state.tick + duration` and never mutated
+  // thereafter; tickGame just compares against it every tick.
+  expiresAtTick: number
+}
+
+export interface ControlEffect {
+  type: 'hack'
+  expiresAtTick: number
+}
+
+export interface ShieldEffect {
+  expiresAtTick: number
+}
+
+// One active effect per axis — a same-axis activation replaces whatever was already there rather
+// than stacking (see applyActivation), which is what lets a self-Stasis instantly cancel an
+// incoming Overclock. Different axes coexist independently. Prune has no entry here at all — it's
+// instant/one-shot, never an ongoing effect.
+export interface PlayerEffects {
+  speed: SpeedEffect | null
+  control: ControlEffect | null
+  shield: ShieldEffect | null
+}
+
+export interface PowerupPickup {
+  id: string
+  // Decided at spawn time (not collection) for simplicity — see GameBoard.tsx's Powerups layer,
+  // which deliberately ignores this field and renders every live pickup identically, Mario-Kart
+  // mystery-box style. Only revealed once collected, in the holder's own HUD badge.
+  type: PowerupType
+  cell: GridCell
+}
+
 export interface GridCell {
   x: number
   y: number
@@ -46,6 +90,9 @@ export interface PlayerState {
   pendingDirection: Direction | null
   alive: boolean
   color: string
+  // Single-slot inventory — null when empty. Set on pickup collection, cleared on activation.
+  heldPowerup: PowerupType | null
+  effects: PlayerEffects
 }
 
 export interface GameSettings {
@@ -62,6 +109,10 @@ export interface GameSettings {
   // useDeviceOrientation) just follows however the phone is actually being held, rather than being
   // a stored preference itself.
   lockOrientation: boolean
+  // Which powerup types can spawn this round — not a separate on/off flag: "powerups off" is just
+  // an empty array (see gameEngine.ts's maybeSpawnPickup, which only ever spawns from this list),
+  // so a single multi-select control (see PowerupPicker.tsx) covers both at once.
+  enabledPowerups: PowerupType[]
 }
 
 export interface GameState {
@@ -73,6 +124,8 @@ export interface GameState {
   // rather than trail length, since a laggy trailGrowthTier can leave trail length unchanged on a
   // tick that both grows and trims it (see gameEngine.ts's tickGame).
   tick: number
+  // Board-wide, not per-player — bounded by POWERUP_MAX_CONCURRENT, so a linear scan is fine.
+  pickups: PowerupPickup[]
 }
 
 export interface TurnIntentEvent {

@@ -8,9 +8,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import GameBoardHost from '@/components/GameBoardHost'
 import OnboardingOverlay from '@/components/OnboardingOverlay'
+import { PowerupHud } from '@/components/PowerupHud'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import TouchInputLayer from '@/components/TouchInputLayer'
-import { BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS } from '@/constants/game'
+import { BOARD_REORIENT_SETTLE_MS, BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS, TRAIL_GROWTH_RATE } from '@/constants/game'
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
@@ -31,21 +32,30 @@ interface GameRoundProps {
   // via GameRound's own lazy useState below rather than as a live value: unlike a portrait<->
   // landscape change, a LANDSCAPE_LEFT<->LANDSCAPE_RIGHT flip doesn't change the board's measured
   // size, so it wouldn't trip the resize-remount below — without freezing it, the sides could swap
-  // out from under the players mid-round on a 180° turn, exactly what the unconditional
-  // useOrientationLock below is otherwise trying to prevent.
+  // out from under the players mid-round on a 180° turn, which a fresh round (see GameScreen's own
+  // reorient-settle handling) should only ever do at its own start, not mid-play.
   p1OnRight: boolean
+  // Owned by GameScreen, not this component, so it survives a genuine resize remounting a fresh
+  // GameRound below — see onRoundOutcome.
+  roundHistory: RoundOutcome[]
+  // Reports a just-finished round upward instead of GameRound tracking its own roundHistory, so a
+  // mid-round reorientation (GameScreen unmounts this component while the device settles, then
+  // mounts a fresh one — see BOARD_REORIENT_SETTLE_MS) only ever loses the round that got
+  // interrupted, never the streak already recorded before it.
+  onRoundOutcome: (outcome: RoundOutcome) => void
 }
 
 // Split out from GameScreen so useGameState's lazy initial state (see useGameState.ts) is always
 // built from a real, already-measured board size — mounting it before the board area's onLayout
 // ever fires would lock the grid to a throwaway placeholder size forever, since that initializer
-// only ever runs once per mount. Keyed by its own size so a genuine resize (in practice only
-// possible on web, since native orientation is locked — see useOrientationLock) remounts a fresh
-// round at the new size instead of rendering a stale grid against a differently-sized container.
-function GameRound({ width, height, settings, colors, orientationMode, p1OnRight: p1OnRightAtMount }: GameRoundProps) {
-  const { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode)
-  const humanPlayers = useMemo(() => humanPlayersFor(settings), [settings])
+// only ever runs once per mount. Keyed by its own size so a genuine, settled resize (see
+// GameScreen's onBoardLayout) remounts a fresh round at the new size instead of rendering a stale
+// grid against a differently-sized container.
+function GameRound({ width, height, settings, colors, orientationMode, p1OnRight: p1OnRightAtMount, roundHistory, onRoundOutcome }: GameRoundProps) {
   const [p1OnRight] = useState(p1OnRightAtMount)
+  const { state, turn, activate, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode, p1OnRight)
+  const humanPlayers = useMemo(() => humanPlayersFor(settings), [settings])
+  const controlInverted = useMemo<Record<Player, boolean>>(() => ({ 1: state.players[1].effects.control !== null, 2: state.players[2].effects.control !== null }), [state.players])
 
   // The persisted, cross-round defaults (not this round's already-locked-in `settings` prop above)
   // — matches every other screen's settings button, which always edits "next time," never the
@@ -69,30 +79,18 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
     soundRef.current = { playCrash, playWin, playDraw }
   }, [playCrash, playWin, playDraw])
 
-  // Chronological record of each round's outcome, oldest first — survives 'rematch' resetting
-  // `state` (rematch only touches useGameState's own state, not this) so the next round's
-  // countdown can show a pip per round already played. Empty until the first round ends, which is
-  // what keeps pips off the very first onboarding countdown and only showing from a rematch on.
-  // Adjusted during render (React's own pattern for deriving state from a prop/state transition)
-  // rather than in an effect, since it's pure state derivation with no external system involved —
-  // unlike the vibration call below, which does belong in an effect.
-  const [roundHistory, setRoundHistory] = useState<RoundOutcome[]>([])
-  const [prevRoundPhase, setPrevRoundPhase] = useState(state.phase)
-  if (prevRoundPhase !== state.phase) {
-    setPrevRoundPhase(state.phase)
-    if (prevRoundPhase !== 'roundOver' && state.phase === 'roundOver' && state.outcome) {
-      setRoundHistory((history) => [...history, state.outcome as RoundOutcome])
-    }
-  }
-
+  // roundHistory itself lives in GameScreen now (see GameRoundProps) — this just reports a
+  // just-finished round upward, once, on the same phase transition the vibration/sound below
+  // already watches for.
   const prevPhaseRef = useRef(state.phase)
   useEffect(() => {
     if (prevPhaseRef.current !== 'roundOver' && state.phase === 'roundOver') {
       vibrationRef.current.notification()
       soundRef.current.playCrash()
+      if (state.outcome) onRoundOutcome(state.outcome)
     }
     prevPhaseRef.current = state.phase
-  }, [state.phase])
+  }, [state.phase, state.outcome, onRoundOutcome])
 
   // The board itself reacts to state.phase immediately (freezing on the crash's final frame) —
   // only the dialog waits, so there's a beat to actually see what just happened before it's
@@ -150,8 +148,9 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
 
   return (
     <>
-      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} />
-      <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} keyScheme={settings.keyScheme} />
+      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} trailGrowthRate={TRAIL_GROWTH_RATE[settings.trailGrowthTier]} />
+      <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} keyScheme={settings.keyScheme} />
+      {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} orientationMode={orientationMode} p1OnRight={p1OnRight} />}
 
       {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown
       timers are scheduled once on mount with no pause hook of their own, so unmounting is what
@@ -189,9 +188,7 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
       the countdown and again once the round-over dialog is up, so it's always in the same place
       regardless of which of the two overlays is on screen. Recolors the same way the peek button
       (above) does during round-over, since it sits over the same backdrop/board there. */}
-      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && (
-        <IconButton icon='cog' iconColor={state.phase === 'roundOver' && !resultPeeked ? 'rgba(255,255,255,0.9)' : fgMuted} size={22} style={styles.settingsButton} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
-      )}
+      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && <IconButton icon='cog' iconColor={state.phase === 'roundOver' && !resultPeeked ? 'rgba(255,255,255,0.9)' : fgMuted} size={22} style={styles.settingsButton} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />}
 
       <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} settings={userSettings} setSettings={setUserSettings} />
     </>
@@ -213,44 +210,82 @@ export default function GameScreen() {
     if (!settings) router.replace('/')
   }, [settings])
 
-  // orientationMode follows the device's current physical shape (see useDeviceOrientation), but
-  // once a round is on screen it's always pinned to whatever that was at mount — unconditionally,
-  // regardless of the Lock Orientation setting below. A genuine mid-round rotation changes the
-  // board area's measured size, which trips BOARD_RESIZE_THRESHOLD_PX's remount logic and would
-  // otherwise blow away the round in progress; Lock Orientation (an app-wide preference, see
-  // SettingsDialog) only governs free rotation on every *other* screen.
+  // orientationMode follows the device's current physical shape (see useDeviceOrientation), same
+  // Lock Orientation preference (see SettingsDialog) as every other screen — a genuine mid-round
+  // rotation no longer blows away the round in progress (see the reorient-settle handling below),
+  // so there's no reason left to override a player's own opt-in preference here specifically.
   const orientationMode = useDeviceOrientation()
-  useOrientationLock(true, orientationMode)
+  useOrientationLock(settings?.lockOrientation ?? false, orientationMode)
   const { p1OnRight } = useP1OnRight()
 
   const insets = useSafeAreaInsets()
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const colors = useMemo<Record<Player, string>>(() => ({ 1: themeColors.primary, 2: themeColors.secondary }), [themeColors.primary, themeColors.secondary])
 
+  // Chronological record of each round's outcome this match, oldest first — lives here rather than
+  // inside GameRound so it survives a reorientation remounting a fresh one below (only the round
+  // that got interrupted is lost, never the streak already recorded before it).
+  const [roundHistory, setRoundHistory] = useState<RoundOutcome[]>([])
+  const handleRoundOutcome = useCallback((outcome: RoundOutcome) => {
+    setRoundHistory((history) => [...history, outcome])
+  }, [])
+
   // The safe area's edge IS the wall (see PLAN.md) — the board area is bounded to exactly the safe
   // area, and running off that edge is a crash like any trail. GameBoard draws a thin two-color
   // outline at the grid's actual pixel bounds to mark exactly where that edge is.
   const [boardSize, setBoardSize] = useState<{ width: number; height: number } | null>(null)
+  // True from the moment a genuine resize is first detected until layout settles at its final size
+  // (see BOARD_REORIENT_SETTLE_MS) — GameRound is unmounted for this whole window (see the render
+  // below) rather than kept mounted at its old, now-stale size, which is what actually "pauses" the
+  // round: no tick loop runs while nothing is mounted to run it.
+  const [reorienting, setReorienting] = useState(false)
+  const pendingSizeRef = useRef<{ width: number; height: number } | null>(null)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    },
+    []
+  )
+
   const onBoardLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout
     setBoardSize((prev) => {
       if (!prev) return { width, height }
       // Ignores sub-threshold wobble (a transient inset change, not a real resize — see
-      // BOARD_RESIZE_THRESHOLD_PX) rather than remounting GameRound (below) and discarding
-      // whatever round is in progress.
+      // BOARD_RESIZE_THRESHOLD_PX) — prev itself is left untouched, whether or not a settle window
+      // is currently in progress (in which case this is just one more intermediate frame of the
+      // same rotation, and doesn't need its own wobble check).
       const changed = Math.abs(prev.width - width) > BOARD_RESIZE_THRESHOLD_PX || Math.abs(prev.height - height) > BOARD_RESIZE_THRESHOLD_PX
-      return changed ? { width, height } : prev
+      if (!changed) return prev
+
+      pendingSizeRef.current = { width, height }
+      setReorienting(true)
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+      settleTimerRef.current = setTimeout(() => {
+        setBoardSize(pendingSizeRef.current)
+        setReorienting(false)
+      }, BOARD_REORIENT_SETTLE_MS)
+      return prev
     })
   }, [])
 
   const bg = dark ? '#000000' : '#FFFFFF'
+  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   if (!settings) return null
 
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
       <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
-        {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} orientationMode={orientationMode} p1OnRight={p1OnRight} />}
+        {reorienting ? (
+          <View style={styles.reorientingZone}>
+            <Icon source='screen-rotation' size={40} color={fgMuted} />
+            <Text style={[styles.reorientingText, { color: fgMuted }]}>Reorienting…</Text>
+          </View>
+        ) : (
+          boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />
+        )}
       </View>
     </View>
   )
@@ -279,6 +314,16 @@ const styles = StyleSheet.create({
   },
   overlayTitle: { fontWeight: 'bold' },
   peekButton: { left: 4, position: 'absolute', top: 4 },
+  reorientingText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
+  reorientingZone: {
+    alignItems: 'center',
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
   root: { flex: 1 },
   settingsButton: { position: 'absolute', right: 4, top: 4 }
 })

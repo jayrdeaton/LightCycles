@@ -31,3 +31,30 @@ export function countReachableCells(start: GridCell, grid: GridSize, occupied: R
 
   return queue.length
 }
+
+// Same 4-directional BFS shape as countReachableCells above, but stops early and returns the
+// step-distance to the first cell in `targets` it reaches, or null if none is reachable within
+// `maxCount` — used by cpuAi.ts to bias pickup-seeking without a second, differently-shaped search.
+export function distanceToNearestTarget(start: GridCell, grid: GridSize, occupied: ReadonlySet<string>, targets: ReadonlySet<string>, maxCount: number = Infinity): number | null {
+  if (!isInBounds(start, grid) || occupied.has(cellKey(start))) return null
+  if (targets.has(cellKey(start))) return 0
+
+  const visited = new Set<string>([cellKey(start)])
+  const queue: { cell: GridCell; dist: number }[] = [{ cell: start, dist: 0 }]
+
+  let head = 0
+  while (head < queue.length && queue.length < maxCount) {
+    const { cell, dist } = queue[head]
+    head++
+    for (const direction of ALL_DIRECTIONS) {
+      const next = stepCell(cell, direction)
+      const key = cellKey(next)
+      if (visited.has(key) || !isInBounds(next, grid) || occupied.has(key)) continue
+      if (targets.has(key)) return dist + 1
+      visited.add(key)
+      queue.push({ cell: next, dist: dist + 1 })
+    }
+  }
+
+  return null
+}

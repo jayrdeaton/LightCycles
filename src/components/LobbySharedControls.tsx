@@ -1,14 +1,9 @@
-import { IconButton } from '@rific/feedback-press'
 import { StyleSheet, View } from 'react-native'
 
 import { IconDropdown } from '@/components/IconDropdown'
+import { PowerupPicker, PowerupPickerOption } from '@/components/PowerupPicker'
 import { PopoverHost, usePopoverHost } from '@/hooks/usePopoverHost'
-import { CpuDifficulty, GridSizeTier, SpeedTier, TrailGrowthTier } from '@/types'
-
-// Matches IconDropdown's own TRIGGER_SIZE — keeps the speed ramp toggle's hit area and row
-// alignment consistent with its sibling triggers even though, unlike them, it's a plain
-// on/off button rather than a popover anchor.
-const TOGGLE_SIZE = 44
+import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailGrowthTier } from '@/types'
 
 interface GridSizeOption {
   value: GridSizeTier
@@ -50,11 +45,15 @@ interface Props {
   speedTier: SpeedTier
   speedOptions: SpeedOption[]
   onSpeedChange: (value: SpeedTier) => void
-  speedRampEnabled: boolean
-  onToggleSpeedRamp: () => void
   trailGrowthTier: TrailGrowthTier
   trailGrowthOptions: TrailGrowthOption[]
   onTrailGrowthChange: (value: TrailGrowthTier) => void
+  // Which powerup types can spawn this round — "off" is simply an empty array (see GameSettings'
+  // own comment), so this one multi-select control covers both at once rather than needing a
+  // separate on/off toggle alongside it.
+  enabledPowerups: PowerupType[]
+  powerupOptions: PowerupPickerOption[]
+  onPowerupsChange: (value: PowerupType[]) => void
   // Omitted entirely for two-player — there's no CPU to tune the difficulty of.
   cpuDifficulty?: CpuDifficulty
   cpuDifficultyOptions?: CpuDifficultyOption[]
@@ -70,9 +69,9 @@ interface Props {
 // `host` is passed in to share with the player panels instead (vs-CPU mode).
 // This component's own popover ids — used to check membership below, not just "is anything open on
 // the host", since a shared host (vs-CPU) also carries the player panels' own popover ids.
-const OWN_IDS = ['gridSize', 'speed', 'trailGrowth', 'cpuDifficulty']
+const OWN_IDS = ['gridSize', 'speed', 'trailGrowth', 'powerups', 'cpuDifficulty']
 
-export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOptions, onGridSizeChange, speedTier, speedOptions, onSpeedChange, speedRampEnabled, onToggleSpeedRamp, trailGrowthTier, trailGrowthOptions, onTrailGrowthChange, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange, accentColor, mutedColor, dark }: Props) {
+export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOptions, onGridSizeChange, speedTier, speedOptions, onSpeedChange, trailGrowthTier, trailGrowthOptions, onTrailGrowthChange, enabledPowerups, powerupOptions, onPowerupsChange, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange, accentColor, mutedColor, dark }: Props) {
   const ownHost = usePopoverHost()
   const host = sharedHost ?? ownHost
   // See LobbyPlayerPanel's identical ownPopoverOpen comment — elevating this row for *any* open
@@ -86,11 +85,13 @@ export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOp
 
       <IconDropdown id='speed' host={host} icon='speedometer' accessibilityLabel='Speed' options={speedOptions} value={speedTier} onChange={onSpeedChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
 
-      <View style={styles.toggleBox}>
-        <IconButton icon='trending-up' iconColor={speedRampEnabled ? accentColor : mutedColor} size={22} accessibilityLabel={`Speed ramp ${speedRampEnabled ? 'on' : 'off'}`} onPress={onToggleSpeedRamp} />
-      </View>
+      {/* Speed ramp toggle hidden for now — settings.speedRampEnabled stays wired through
+      gameEngine/validation/useGameState and defaults to false, so this is a pure UI hide, not a
+      feature removal. Re-add the toggle here (and its props above) to bring it back. */}
 
       <IconDropdown id='trailGrowth' host={host} icon='chart-line' accessibilityLabel='Trail growth' options={trailGrowthOptions} value={trailGrowthTier} onChange={onTrailGrowthChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
+
+      <PowerupPicker id='powerups' host={host} options={powerupOptions} value={enabledPowerups} onChange={onPowerupsChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
 
       {cpuDifficulty && cpuDifficultyOptions && onCpuDifficultyChange && <IconDropdown id='cpuDifficulty' host={host} icon='chip' accessibilityLabel='CPU difficulty' options={cpuDifficultyOptions} value={cpuDifficulty} onChange={onCpuDifficultyChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />}
     </View>
@@ -110,12 +111,5 @@ const styles = StyleSheet.create({
   // sibling panel.
   rowOpen: {
     zIndex: 100
-  },
-  // Matches IconDropdown's own triggerBox — see TOGGLE_SIZE's comment above.
-  toggleBox: {
-    alignItems: 'center',
-    height: TOGGLE_SIZE,
-    justifyContent: 'center',
-    width: TOGGLE_SIZE
   }
 })

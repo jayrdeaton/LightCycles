@@ -1,9 +1,10 @@
-import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_NORMAL_SUBOPTIMAL_CHANCE } from '@/constants/game'
-import { CpuDifficulty, Direction, GameState, GridSize, Player, PlayerState } from '@/types'
+import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
+import { CpuDifficulty, Direction, GameState, GridCell, GridSize, Player, PlayerState, PowerupPickup, PowerupType } from '@/types'
 
-import { countReachableCells } from './floodFill'
-import { applyTurnIntent, buildOccupiedSet } from './gameEngine'
+import { countReachableCells, distanceToNearestTarget } from './floodFill'
+import { applyActivation, applyTurnIntent, buildOccupiedSet, stepsFor } from './gameEngine'
 import { ALL_DIRECTIONS, cellKey, isInBounds, isOppositeDirection, stepCell } from './grid'
+import { applyControlInversion } from './turnIntent'
 
 // The CPU always plays player 2 — see index.tsx/game.tsx, which fix the human at player 1 (and
 // suppress the face-to-face flip entirely) whenever gameMode is 'vsCpu'.
@@ -15,6 +16,39 @@ export interface ChooseCpuDirectionParams {
   occupied: ReadonlySet<string>
   difficulty: CpuDifficulty
   random?: () => number
+  // How many cells THIS player itself advances this tick (see gameEngine.ts's stepsFor) — a
+  // boosted CPU needs its own safety lookahead to walk the same number of cells ahead, or a
+  // direction that's only safe for 1 cell but crashes on the 2nd (while boosted) would misscore as
+  // safe. Defaults to 1 (today's behavior) for every existing call site/test.
+  ownSteps?: number
+  // Powerup awareness, both optional/defaulted so existing call sites/tests are unaffected.
+  pickups?: PowerupPickup[]
+  heldPowerup?: PowerupType | null
+}
+
+// Walks `ownSteps` cells ahead in `direction` from `head`, treating each intermediate cell as
+// occupied for the next step's own check (mirroring gameEngine.ts's tickGame sub-step semantics),
+// then flood-fills from wherever that lands. Unsafe (space -1, cell null) if any of those steps
+// would be out of bounds or already occupied.
+function candidateSafety(head: GridCell, direction: Direction, grid: GridSize, occupied: ReadonlySet<string>, ownSteps: number, cap: number): { space: number; cell: GridCell | null } {
+  let cell = head
+  let working: ReadonlySet<string> = occupied
+  const steps = Math.max(1, ownSteps)
+  for (let i = 0; i < steps; i++) {
+    cell = stepCell(cell, direction)
+    if (!isInBounds(cell, grid) || working.has(cellKey(cell))) return { space: -1, cell: null }
+    if (i < steps - 1) working = new Set(working).add(cellKey(cell))
+  }
+  return { space: countReachableCells(cell, grid, working, cap), cell }
+}
+
+// True only when every legal (non-180°) direction is unsafe within the player's own lookahead —
+// used to decide when a held Shield is worth popping preemptively (see shouldCpuActivate) rather
+// than accepting a move that's about to crash anyway.
+function isCornered(player: PlayerState, grid: GridSize, occupied: ReadonlySet<string>, ownSteps: number): boolean {
+  const head = player.trail[player.trail.length - 1]
+  const candidates = ALL_DIRECTIONS.filter((direction) => !isOppositeDirection(direction, player.direction))
+  return candidates.every((direction) => candidateSafety(head, direction, grid, occupied, ownSteps, CPU_FLOOD_FILL_CAP).space < 0)
 }
 
 // Scores each legal turn (i.e. not a 180° reversal — same rule the reducer enforces for human
@@ -24,24 +58,36 @@ export interface ChooseCpuDirectionParams {
 // small pocket still scores low. Difficulty modulates how faithfully the bot follows that score,
 // not how fast it reacts (see useGameState.ts) — 'hard' always takes the best-scoring move,
 // 'normal'/'easy' sometimes settle for a worse one.
-export function chooseCpuDirection({ player, grid, occupied, difficulty, random = Math.random }: ChooseCpuDirectionParams): Direction {
+//
+// Powerup-seeking (difficulty-gated via CPU_POWERUP_AWARENESS) only ever breaks a tie among
+// directions that already score within `seekTieToleranceCells` of the best — it can never pull the
+// bot toward a pickup at the cost of a genuinely safer option, which is what keeps existing
+// survival behavior stable with powerups on.
+export function chooseCpuDirection({ player, grid, occupied, difficulty, random = Math.random, ownSteps = 1, pickups = [], heldPowerup = null }: ChooseCpuDirectionParams): Direction {
   const head = player.trail[player.trail.length - 1]
   const candidates = ALL_DIRECTIONS.filter((direction) => !isOppositeDirection(direction, player.direction))
 
-  const scored = candidates
-    .map((direction) => {
-      const next = stepCell(head, direction)
-      const safe = isInBounds(next, grid) && !occupied.has(cellKey(next))
-      return { direction, space: safe ? countReachableCells(next, grid, occupied, CPU_FLOOD_FILL_CAP) : -1 }
-    })
-    .sort((a, b) => b.space - a.space)
+  const scored = candidates.map((direction) => ({ direction, ...candidateSafety(head, direction, grid, occupied, ownSteps, CPU_FLOOD_FILL_CAP) })).sort((a, b) => b.space - a.space)
 
   const maxSpace = scored[0].space
   const tiedForBest = scored.filter((s) => s.space === maxSpace)
   // Prefers continuing straight over an equally-good turn, purely so the bot doesn't zigzag
   // through symmetric open space for no reason — ties on open-space score are common early in a
   // round, when nothing has carved up the grid yet.
-  const best = (tiedForBest.find((s) => s.direction === player.direction) ?? tiedForBest[0]).direction
+  let best = (tiedForBest.find((s) => s.direction === player.direction) ?? tiedForBest[0]).direction
+
+  const awareness = CPU_POWERUP_AWARENESS[difficulty]
+  if (awareness.seekPickups && !heldPowerup && pickups.length > 0 && maxSpace >= 0) {
+    const targets = new Set(pickups.map((pu) => cellKey(pu.cell)))
+    const tied = scored.filter((s) => s.space >= 0 && maxSpace - s.space <= awareness.seekTieToleranceCells)
+    if (tied.length > 1) {
+      const ranked = tied
+        .map((s) => ({ direction: s.direction, dist: s.cell ? distanceToNearestTarget(s.cell, grid, occupied, targets, CPU_FLOOD_FILL_CAP) : null }))
+        .filter((s): s is { direction: Direction; dist: number } => s.dist !== null)
+        .sort((a, b) => a.dist - b.dist)
+      if (ranked.length > 0) best = ranked[0].direction
+    }
+  }
 
   if (difficulty === 'hard') return best
 
@@ -63,7 +109,10 @@ export function chooseCpuDirection({ player, grid, occupied, difficulty, random 
 
 // Queues the CPU's chosen turn the same way a human input source would (see turnIntent.ts) —
 // applyTurnIntent still owns the actual reversal/no-op/phase/alive guards, so the bot can't bypass
-// those rules just by going through a different call site than human input does.
+// those rules just by going through a different call site than human input does. Hack's steering
+// inversion is applied to the CPU's own *chosen* direction, right before it's queued, the same way
+// every human input source applies it at its own single chokepoint (see applyControlInversion) —
+// chooseCpuDirection itself always reasons about the true best direction, uninverted.
 //
 // `occupied` defaults to a fresh build from `state.players`, same reasoning as tickGame's own
 // default in gameEngine.ts — useGameState.ts builds one set per tick and passes it to both this
@@ -73,6 +122,53 @@ export function applyCpuTurn(state: GameState, difficulty: CpuDifficulty, occupi
   const player = state.players[CPU_PLAYER]
   if (!player.alive) return state
 
-  const direction = chooseCpuDirection({ player, grid: state.grid, occupied, difficulty, random })
+  const rawDirection = chooseCpuDirection({ player, grid: state.grid, occupied, difficulty, random, ownSteps: stepsFor(player.effects), pickups: state.pickups, heldPowerup: player.heldPowerup })
+  const direction = applyControlInversion(rawDirection, player.effects.control?.type === 'hack')
   return applyTurnIntent(state, CPU_PLAYER, direction)
+}
+
+// Decides whether the CPU should activate its held powerup this tick — a difficulty-gated
+// heuristic layer (see CPU_POWERUP_AWARENESS) on top of the same flood-fill space assessment
+// chooseCpuDirection already uses, not a separate lookahead system. Each branch reasons only about
+// its own held type; there's no "pick the best of several held items" question since the
+// single-slot inventory (see gameEngine.ts's applyActivation) means at most one is ever held.
+export function shouldCpuActivate(state: GameState, difficulty: CpuDifficulty, occupied: ReadonlySet<string>, random: () => number = Math.random): boolean {
+  const cpu = state.players[CPU_PLAYER]
+  const held = cpu.heldPowerup
+  if (!held) return false
+
+  const awareness = CPU_POWERUP_AWARENESS[difficulty]
+  const humanPlayer: Player = CPU_PLAYER === 1 ? 2 : 1
+  const human = state.players[humanPlayer]
+  const cpuOwnSteps = stepsFor(cpu.effects)
+  const cpuHead = cpu.trail[cpu.trail.length - 1]
+  const humanHead = human.trail[human.trail.length - 1]
+  const ownSpace = candidateSafety(cpuHead, cpu.pendingDirection ?? cpu.direction, state.grid, occupied, cpuOwnSteps, CPU_FLOOD_FILL_CAP).space
+  const humanSpace = candidateSafety(humanHead, human.pendingDirection ?? human.direction, state.grid, occupied, stepsFor(human.effects), CPU_FLOOD_FILL_CAP).space
+
+  if (held === 'stasis' && awareness.defensiveCounters) {
+    return cpu.effects.speed?.type === 'overclock' && ownSpace >= 0 && ownSpace < POWERUP_CPU_DANGER_SPACE_THRESHOLD
+  }
+  if (held === 'shield' && awareness.defensiveCounters) {
+    return isCornered(cpu, state.grid, occupied, cpuOwnSteps)
+  }
+  if (held === 'overdrive' && awareness.opportunisticSelfUse) {
+    return !cpu.effects.speed && ownSpace > POWERUP_CPU_OVERDRIVE_MIN_SPACE
+  }
+  if (held === 'prune' && awareness.opportunisticSelfUse) {
+    return ownSpace >= 0 && ownSpace < POWERUP_CPU_PRUNE_SPACE_THRESHOLD
+  }
+  if ((held === 'hack' || held === 'overclock') && awareness.offensiveUse) {
+    return (humanSpace >= 0 && humanSpace < POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD) || random() < POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE
+  }
+  return false
+}
+
+// Delegates to the exact same applyActivation a human's tap goes through — CPU-awareness is
+// purely a decision layer on top (see shouldCpuActivate), mirroring how applyCpuTurn above
+// delegates to applyTurnIntent.
+export function applyCpuActivation(state: GameState, difficulty: CpuDifficulty, occupied: ReadonlySet<string> = buildOccupiedSet(state.players), random?: () => number): GameState {
+  if (state.phase !== 'playing') return state
+  if (!shouldCpuActivate(state, difficulty, occupied, random)) return state
+  return applyActivation(state, CPU_PLAYER)
 }

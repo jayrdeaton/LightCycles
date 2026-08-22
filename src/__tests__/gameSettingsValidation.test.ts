@@ -8,7 +8,8 @@ const VALID = {
   gridSizeTier: 'medium',
   trailGrowthTier: 'static',
   keyScheme: { 1: 'wasd', 2: 'arrows' },
-  lockOrientation: false
+  lockOrientation: false,
+  enabledPowerups: []
 }
 
 describe('isValidSettings', () => {
@@ -75,5 +76,18 @@ describe('isValidSettings', () => {
   it('rejects a non-boolean lockOrientation', () => {
     expect(isValidSettings({ ...VALID, lockOrientation: 'true' })).toBe(false)
     expect(isValidSettings({ ...VALID, lockOrientation: 1 })).toBe(false)
+  })
+
+  it('accepts a non-empty enabledPowerups list', () => {
+    expect(isValidSettings({ ...VALID, enabledPowerups: ['overdrive', 'hack'] })).toBe(true)
+  })
+
+  it('rejects a non-array enabledPowerups', () => {
+    expect(isValidSettings({ ...VALID, enabledPowerups: true })).toBe(false)
+    expect(isValidSettings({ ...VALID, enabledPowerups: 'overdrive' })).toBe(false)
+  })
+
+  it('rejects an enabledPowerups list containing an invalid entry', () => {
+    expect(isValidSettings({ ...VALID, enabledPowerups: ['overdrive', 'not-a-real-powerup'] })).toBe(false)
   })
 })

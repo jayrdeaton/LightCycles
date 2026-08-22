@@ -1,4 +1,4 @@
-import { GridSizeTier, SpeedTier, TrailGrowthTier } from '@/types'
+import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailGrowthTier } from '@/types'
 
 // Grid cell edge length in px per tier — cols/rows are derived from the safe area at this
 // resolution (see utils/grid.ts). Matches the lobby's small/medium/large vehicle icons literally:
@@ -93,6 +93,14 @@ export const DEFAULT_P2_COLOR = '#f44336'
 // rotation swaps width/height by hundreds of px, comfortably clearing this.
 export const BOARD_RESIZE_THRESHOLD_PX = 40
 
+// Once a genuine resize clears the threshold above, game.tsx doesn't remount GameRound on the very
+// next layout event — a physical rotation reports several intermediate sizes as the OS animates it,
+// not one clean jump, so committing the first one would remount into a transient, not-yet-final
+// shape. Each qualifying event instead (re)starts this settle window; only once layout goes quiet
+// for its full length does the new size actually commit. Longer than a typical rotation animation
+// (~300ms) so a real device doesn't cut it close and remount a beat early.
+export const BOARD_REORIENT_SETTLE_MS = 450
+
 // CPU difficulty (see utils/cpuAi.ts): both tiers below 'hard' still use the same flood-fill
 // scoring, just follow it less faithfully — chance per tick of taking the second-best move
 // instead of the best ('normal'), or a uniformly random non-instantly-fatal move instead of the
@@ -113,3 +121,86 @@ export const CPU_EASY_RANDOM_CHANCE = 0.5
 // 14) to cover the same physical board area now that cells are smaller and there are more of them
 // per unit area — otherwise this would read as "abundant" far too early relative to the real board.
 export const CPU_FLOOD_FILL_CAP = 900
+
+// ─── Powerups ───────────────────────────────────────────────────────────────
+// Tick-based (not ms) throughout, matching TRAIL_GROWTH_RATE's own precedent — see gameEngine.ts's
+// tickGame, which already treats ticks (not wall-clock time) as this game's true unit of time.
+// Real-world cadence/duration then varies slightly with speedTier/gridSizeTier, same as every
+// other tick-denominated constant here.
+export const POWERUP_SPAWN_INTERVAL_TICKS = 90 // ~5.6s at 'normal' speed tier (63ms/tick)
+export const POWERUP_MAX_CONCURRENT = 2
+
+export const POWERUP_ALL_TYPES: PowerupType[] = ['overdrive', 'stasis', 'shield', 'prune', 'hack', 'overclock']
+
+// Ticks a timed activation remains in force — see SpeedEffect/ControlEffect/ShieldEffect's own
+// expiresAtTick comment. Tuned relative to 'normal' speed tier's ~16 ticks/sec.
+export const POWERUP_EFFECT_DURATION_TICKS: Record<'overdrive' | 'stasis' | 'shield' | 'hack' | 'overclock', number> = {
+  overdrive: 40, // ~2.5s of self-boost
+  stasis: 24, // ~1.5s frozen — long enough to matter, short enough not to just stall the round
+  shield: 48, // ~3s armed window to actually reach a wall worth breaking through
+  hack: 32, // ~2s of inverted opponent steering
+  overclock: 32 // ~2s of forced opponent 2x speed
+}
+
+// Cells advanced in one tickGame sub-step loop for a boosted player — Stasis's 0 isn't a
+// multiplier lookup, it's "skip movement entirely," handled as its own case in tickGame.
+export const POWERUP_SPEED_MULTIPLIER: Record<'overdrive' | 'overclock', 2> = { overdrive: 2, overclock: 2 }
+
+// Cells removed from the front of a trail on Prune activation — reuses trimTrailFront, the same
+// slice-off-the-front primitive tickGame's periodic trailGrowthTier trim already uses, just
+// applied all at once (and to both players) instead of gradually. Always leaves at least the head
+// cell intact (see trimTrailFront's own clamp).
+export const POWERUP_PRUNE_AMOUNT_CELLS = 15
+
+// Visual sizing for the on-board "mystery box" pickup glyph (see GameBoard.tsx's Powerups layer,
+// which intentionally renders every pickup identically regardless of type) — floors above trail
+// width so a pickup stays legible even on the 'small' grid tier's tiny cells.
+export function powerupPickupRadiusPx(cellPx: number): number {
+  return Math.max(cellPx * 1.8, 9)
+}
+
+// On-board head-effect-tell ring colors, keyed by what's actually driving the effect (not just its
+// axis) so Overdrive/Stasis/Overclock read as visually distinct despite Overdrive and Overclock
+// sharing the same 2x multiplier — a player should be able to tell "sped up because I chose to" from
+// "sped up because my opponent did this to me" at a glance.
+export const POWERUP_EFFECT_COLORS: Record<'overdrive' | 'stasis' | 'overclock' | 'hack' | 'shield', string> = {
+  overdrive: '#FFC107', // gold — self speed-up
+  stasis: '#29B6F6', // ice blue — frozen
+  overclock: '#E53935', // red — danger, forced on you
+  hack: '#AB47BC', // violet — control-axis interference
+  shield: '#26C6DA' // bright cyan — invincible
+}
+
+// Held-item HUD badge icon per type (MDI names, matching the icon set already used throughout
+// SettingsDialog/LobbySharedControls) — shown only once a pickup is collected, since the on-board
+// glyph itself never reveals type (see powerupPickupRadiusPx's own comment).
+export const POWERUP_ICONS: Record<PowerupType, string> = {
+  overdrive: 'speedometer',
+  stasis: 'pause-circle-outline',
+  shield: 'shield-outline',
+  prune: 'content-cut',
+  hack: 'swap-horizontal-bold',
+  overclock: 'chip'
+}
+
+// CPU powerup-awareness knobs, one config per difficulty tier — layered onto the existing
+// flood-fill scoring the same way CPU_NORMAL_SUBOPTIMAL_CHANCE/CPU_EASY_RANDOM_CHANCE layer onto
+// its base direction choice: same algorithm, different faithfulness per tier, not a different
+// algorithm per tier. See cpuAi.ts's chooseCpuDirection/shouldCpuActivate.
+export interface CpuPowerupAwareness {
+  seekPickups: boolean // bias tied survival-safe directions toward a nearby pickup
+  seekTieToleranceCells: number // how close two directions' space scores must be to let pickup-seeking break the tie
+  defensiveCounters: boolean // pop held Stasis when Overclocked into a tight spot, or Shield when truly cornered
+  opportunisticSelfUse: boolean // use held Overdrive/Prune proactively, not just reactively
+  offensiveUse: boolean // use held Hack/Overclock against the opponent when advantageous
+}
+export const CPU_POWERUP_AWARENESS: Record<CpuDifficulty, CpuPowerupAwareness> = {
+  easy: { seekPickups: false, seekTieToleranceCells: 0, defensiveCounters: true, opportunisticSelfUse: false, offensiveUse: false },
+  normal: { seekPickups: true, seekTieToleranceCells: 20, defensiveCounters: true, opportunisticSelfUse: true, offensiveUse: true },
+  hard: { seekPickups: true, seekTieToleranceCells: 40, defensiveCounters: true, opportunisticSelfUse: true, offensiveUse: true }
+}
+export const POWERUP_CPU_DANGER_SPACE_THRESHOLD = 15 // "tight spot" — reachable-cell floor that triggers a defensive Stasis/Shield pop
+export const POWERUP_CPU_OVERDRIVE_MIN_SPACE = 60 // "coast is clear" — floor for opportunistic Overdrive
+export const POWERUP_CPU_PRUNE_SPACE_THRESHOLD = 20 // use held Prune when maneuvering room is getting tight
+export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock
+export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock anyway, so 'normal'/'hard' don't hoard forever

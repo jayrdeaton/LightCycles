@@ -44,13 +44,16 @@ export function isOppositeDirection(a: Direction, b: Direction): boolean {
 // left/right moving toward each other along the x axis. Player 1 is assumed to be the device's
 // owner, so in face-to-face they get the "near" bottom zone (the natural portrait orientation
 // faces them) while player 2 is the "far" player (top zone, needs the input flip — see
-// utils/turnIntent.ts); in side-by-side/web, player 1 is the "left" player.
+// utils/turnIntent.ts). In side-by-side, `p1OnRight` decides which zone is player 1's — see
+// useP1OnRight — so a player's actual starting cycle always lands in the same zone GameBoard.tsx's
+// wallPath and TouchInputLayer.tsx's hit zone are drawn for, rather than a side that's fixed
+// regardless of which way the device was rotated.
 //
 // Each player starts at the dead center of their own half of the board (their "zone" — see
 // GameBoard.tsx/TouchInputLayer.tsx's identical split) rather than hugging the outer wall. That
 // keeps the two players closer together at the start and leaves a full quarter-board of room
 // behind each of them to maneuver into.
-export function startingStateFor(player: Player, grid: GridSize, mode: OrientationMode): { head: GridCell; direction: Direction } {
+export function startingStateFor(player: Player, grid: GridSize, mode: OrientationMode, p1OnRight: boolean): { head: GridCell; direction: Direction } {
   const axisLength = mode === 'faceToFace' ? grid.rows : grid.cols
   const firstHalfLength = Math.floor(axisLength / 2)
   // Center of the [0, firstHalfLength) zone and center of the [firstHalfLength, axisLength) zone.
@@ -63,5 +66,6 @@ export function startingStateFor(player: Player, grid: GridSize, mode: Orientati
   }
 
   const y = Math.floor(grid.rows / 2)
-  return player === 1 ? { head: { x: firstZoneCenter, y }, direction: 'right' } : { head: { x: secondZoneCenter, y }, direction: 'left' }
+  const onRight = player === 1 ? p1OnRight : !p1OnRight
+  return onRight ? { head: { x: secondZoneCenter, y }, direction: 'left' } : { head: { x: firstZoneCenter, y }, direction: 'right' }
 }

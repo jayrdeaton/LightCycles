@@ -1,12 +1,17 @@
+import { POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE } from '@/constants/game'
 import { GameState, PlayerState } from '@/types'
-import { applyCpuTurn, chooseCpuDirection } from '@/utils/cpuAi'
+import { applyCpuActivation, applyCpuTurn, chooseCpuDirection, shouldCpuActivate } from '@/utils/cpuAi'
+
+function ps(overrides: Partial<PlayerState> & Pick<PlayerState, 'trail' | 'direction'>): PlayerState {
+  return { pendingDirection: null, alive: true, color: '#000', heldPowerup: null, effects: { speed: null, control: null, shield: null }, ...overrides }
+}
 
 describe('chooseCpuDirection', () => {
   it('avoids a dead end and picks the direction with strictly more open space', () => {
     // 1-row strip: 'up' is immediately out of bounds, 'left' dead-ends after one cell, 'right'
     // opens onto 4 free cells — an unambiguous, hand-countable comparison.
     const grid = { cols: 8, rows: 1 }
-    const player: PlayerState = { trail: [{ x: 3, y: 0 }], direction: 'up', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 3, y: 0 }], direction: 'up' })
     const occupied = new Set(['3,0', '1,0'])
 
     expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard' })).toBe('right')
@@ -16,7 +21,7 @@ describe('chooseCpuDirection', () => {
     // 5x5 grid; 'left' is a sealed 1-cell pocket, 'up' and 'right' both open onto the same large
     // connected region (tied). Heading 'up' already, so the tie should resolve to 'up'.
     const grid = { cols: 5, rows: 5 }
-    const player: PlayerState = { trail: [{ x: 2, y: 2 }], direction: 'up', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 2, y: 2 }], direction: 'up' })
     const occupied = new Set(['2,2', '0,2', '1,1', '1,3'])
 
     expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard' })).toBe('up')
@@ -24,7 +29,7 @@ describe('chooseCpuDirection', () => {
 
   it('returns the only safe option when the rest are fatal', () => {
     const grid = { cols: 3, rows: 1 }
-    const player: PlayerState = { trail: [{ x: 1, y: 0 }], direction: 'up', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 1, y: 0 }], direction: 'up' })
     const occupied = new Set(['1,0', '2,0'])
 
     expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard' })).toBe('left')
@@ -32,15 +37,28 @@ describe('chooseCpuDirection', () => {
 
   it('never returns a 180° reversal of the current heading', () => {
     const grid = { cols: 8, rows: 1 }
-    const player: PlayerState = { trail: [{ x: 3, y: 0 }], direction: 'right', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 3, y: 0 }], direction: 'right' })
     const occupied = new Set(['3,0'])
 
     expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard' })).not.toBe('left')
   })
 
+  it('treats a direction that only crashes on its SECOND step (ownSteps=2) as unsafe', () => {
+    // 8x5 grid, heading 'down' (so 'up' is the filtered-out 180°): 'left' and 'down' both dead-end
+    // into 1-cell pockets, while 'right' opens onto the rest of the mostly-empty board — going
+    // around the single obstacle at (4,2) costs nothing when only stepping there once, but is a
+    // direct hit when actually forced to step onto it.
+    const grid = { cols: 8, rows: 5 }
+    const player = ps({ trail: [{ x: 2, y: 2 }], direction: 'down' })
+    const occupied = new Set(['2,2', '0,2', '1,1', '1,3', '2,4', '3,3', '4,2'])
+
+    expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard', ownSteps: 1 })).toBe('right')
+    expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard', ownSteps: 2 })).not.toBe('right')
+  })
+
   describe('normal difficulty', () => {
     const grid = { cols: 8, rows: 1 }
-    const player: PlayerState = { trail: [{ x: 3, y: 0 }], direction: 'up', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 3, y: 0 }], direction: 'up' })
     const occupied = new Set(['3,0', '1,0'])
 
     it('takes the best move when the random roll misses the suboptimal chance', () => {
@@ -54,7 +72,7 @@ describe('chooseCpuDirection', () => {
 
   describe('easy difficulty', () => {
     const grid = { cols: 8, rows: 1 }
-    const player: PlayerState = { trail: [{ x: 3, y: 0 }], direction: 'up', pendingDirection: null, alive: true, color: '#000' }
+    const player = ps({ trail: [{ x: 3, y: 0 }], direction: 'up' })
     const occupied = new Set(['3,0', '1,0'])
 
     it('takes the best move when the random roll misses', () => {
@@ -67,6 +85,39 @@ describe('chooseCpuDirection', () => {
       const random = () => rolls[i++]
       expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'easy', random })).toBe('left')
     })
+
+    it('never seeks pickups — easy has seekPickups disabled', () => {
+      // 'up'/'down' tie for the largest open region; a pickup sits only reachable via 'down'.
+      // Easy should ignore it entirely and fall back to the straight-continuation tiebreak.
+      const grid5 = { cols: 5, rows: 5 }
+      const p = ps({ trail: [{ x: 2, y: 2 }], direction: 'up' })
+      const occ = new Set(['2,2'])
+      const pickups = [{ id: 'pu-1', type: 'overdrive' as const, cell: { x: 2, y: 4 } }]
+      expect(chooseCpuDirection({ player: p, grid: grid5, occupied: occ, difficulty: 'easy', random: () => 0.99, pickups })).toBe('up')
+    })
+  })
+
+  it('breaks a tie toward a reachable pickup when the difficulty is powerup-aware', () => {
+    // 5x5 grid, heading 'up' from center ('down' is the filtered-out 180°): 'up'/'left'/'right' all
+    // tie for the same, nearly-whole-board open space, since a single center obstacle doesn't
+    // disconnect anything here — a pickup two cells to the right (a direct 1-step hop from
+    // 'right's own landing cell, vs. a multi-step detour around the center from 'up'/'left') should
+    // break the tie toward 'right'.
+    const grid = { cols: 5, rows: 5 }
+    const player = ps({ trail: [{ x: 2, y: 2 }], direction: 'up' })
+    const occupied = new Set(['2,2'])
+    const pickups = [{ id: 'pu-1', type: 'overdrive' as const, cell: { x: 4, y: 2 } }]
+
+    expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard', pickups })).toBe('right')
+  })
+
+  it('never seeks a pickup while already holding one', () => {
+    const grid = { cols: 5, rows: 5 }
+    const player = ps({ trail: [{ x: 2, y: 2 }], direction: 'up' })
+    const occupied = new Set(['2,2'])
+    const pickups = [{ id: 'pu-1', type: 'overdrive' as const, cell: { x: 2, y: 4 } }]
+
+    expect(chooseCpuDirection({ player, grid, occupied, difficulty: 'hard', pickups, heldPowerup: 'shield' })).toBe('up')
   })
 })
 
@@ -76,11 +127,12 @@ describe('applyCpuTurn', () => {
       phase: 'playing',
       grid: { cols: 10, rows: 10 },
       players: {
-        1: { trail: [{ x: 2, y: 5 }], direction: 'right', pendingDirection: null, alive: true, color: '#3B82F6' },
-        2: { trail: [{ x: 7, y: 5 }], direction: 'left', pendingDirection: null, alive: true, color: '#EF4444' }
+        1: ps({ trail: [{ x: 2, y: 5 }], direction: 'right', color: '#3B82F6' }),
+        2: ps({ trail: [{ x: 7, y: 5 }], direction: 'left', color: '#EF4444' })
       },
       outcome: null,
-      tick: 0
+      tick: 0,
+      pickups: []
     }
   }
 
@@ -103,5 +155,116 @@ describe('applyCpuTurn', () => {
     const state = baseState()
     state.players[2] = { ...state.players[2], alive: false }
     expect(applyCpuTurn(state, 'hard')).toBe(state)
+  })
+
+  it('inverts its own chosen direction while Hacked', () => {
+    // Same fixture as the very first chooseCpuDirection test: uninverted, the CPU (as player 2)
+    // would choose 'right'. Hacked, it should queue 'left' instead.
+    const state = baseState()
+    state.players[2] = { ...state.players[2], trail: [{ x: 3, y: 0 }], direction: 'up', effects: { speed: null, control: { type: 'hack', expiresAtTick: 100 }, shield: null } }
+    const occupied = new Set(['3,0', '1,0'])
+    const next = applyCpuTurn({ ...state, grid: { cols: 8, rows: 1 } }, 'hard', occupied)
+    expect(next.players[2].pendingDirection).toBe('left')
+  })
+})
+
+describe('shouldCpuActivate', () => {
+  function baseState(): GameState {
+    return {
+      phase: 'playing',
+      grid: { cols: 20, rows: 20 },
+      players: {
+        1: ps({ trail: [{ x: 2, y: 2 }], direction: 'right', color: '#3B82F6' }),
+        2: ps({ trail: [{ x: 10, y: 10 }], direction: 'right', color: '#EF4444' })
+      },
+      outcome: null,
+      tick: 0,
+      pickups: []
+    }
+  }
+
+  it('returns false with nothing held', () => {
+    const state = baseState()
+    expect(shouldCpuActivate(state, 'hard', new Set())).toBe(false)
+  })
+
+  it('pops a defensive Stasis when Overclocked into a tight spot', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], trail: [{ x: 10, y: 10 }], direction: 'right', heldPowerup: 'stasis', effects: { speed: { type: 'overclock', multiplier: 2, expiresAtTick: 50 }, control: null, shield: null } }
+    // Wall the CPU in except for a sliver of room, keeping it under the danger threshold.
+    const occupied = new Set<string>()
+    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},9`)
+    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},11`)
+    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
+  })
+
+  it('does not pop Stasis just for being in a tight spot without an active Overclock', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], heldPowerup: 'stasis' }
+    const occupied = new Set<string>()
+    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},9`)
+    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},11`)
+    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(false)
+  })
+
+  it('pops a held Shield when every direction is unsafe', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], trail: [{ x: 10, y: 10 }], direction: 'right', heldPowerup: 'shield' }
+    const occupied = new Set(['11,10', '9,10', '10,9', '10,11'])
+    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
+  })
+
+  it('does not pop Shield when a safe direction still exists', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], heldPowerup: 'shield' }
+    expect(shouldCpuActivate(state, 'hard', new Set())).toBe(false)
+  })
+
+  it('uses Overdrive opportunistically once the board is open', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], heldPowerup: 'overdrive' }
+    expect(shouldCpuActivate(state, 'hard', new Set())).toBe(true)
+  })
+
+  it('uses Hack/Overclock offensively once the opponent is boxed in', () => {
+    const state = baseState()
+    state.players[1] = { ...state.players[1], trail: [{ x: 1, y: 1 }], direction: 'right' }
+    state.players[2] = { ...state.players[2], heldPowerup: 'hack' }
+    // Seals player 1 into a small 3x3 pocket (9 free cells, bounded by the grid edge on two sides
+    // and a wall on the other two) — comfortably under the offensive-use space threshold.
+    const occupied = new Set<string>()
+    for (let y = 0; y <= 2; y++) occupied.add(`3,${y}`)
+    for (let x = 0; x <= 2; x++) occupied.add(`${x},3`)
+    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
+  })
+
+  it('respects per-difficulty awareness — easy never uses Overdrive opportunistically', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], heldPowerup: 'overdrive' }
+    expect(shouldCpuActivate(state, 'easy', new Set())).toBe(false)
+  })
+
+  it('is a no-op via applyCpuActivation outside the playing phase', () => {
+    const state = { ...baseState(), phase: 'onboarding' as const }
+    state.players[2] = { ...state.players[2], heldPowerup: 'overdrive' }
+    expect(applyCpuActivation(state, 'hard')).toBe(state)
+  })
+
+  it('applyCpuActivation actually activates when shouldCpuActivate is true', () => {
+    const state = baseState()
+    state.players[2] = { ...state.players[2], heldPowerup: 'overdrive' }
+    expect(shouldCpuActivate(state, 'hard', new Set())).toBe(true)
+    const next = applyCpuActivation(state, 'hard', new Set())
+    expect(next.players[2].heldPowerup).toBeNull()
+    expect(next.players[2].effects.speed?.type).toBe('overdrive')
+  })
+})
+
+// Sanity check that the threshold constants used above are what the test math assumes.
+describe('powerup CPU awareness thresholds', () => {
+  it('are positive, sane bounds', () => {
+    expect(POWERUP_CPU_DANGER_SPACE_THRESHOLD).toBeGreaterThan(0)
+    expect(POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD).toBeGreaterThan(0)
+    expect(POWERUP_CPU_OVERDRIVE_MIN_SPACE).toBeGreaterThan(POWERUP_CPU_DANGER_SPACE_THRESHOLD)
   })
 })

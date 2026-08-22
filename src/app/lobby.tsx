@@ -8,15 +8,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LobbySharedControls } from '@/components/LobbySharedControls'
+import { PowerupPickerOption } from '@/components/PowerupPicker'
 import { ReadyButton } from '@/components/ReadyButton'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { LOBBY_PANEL_SWAP_FADE_MS } from '@/constants/game'
+import { LOBBY_PANEL_SWAP_FADE_MS, POWERUP_ICONS } from '@/constants/game'
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { useP1OnRight } from '@/hooks/useP1OnRight'
 import { usePopoverHost } from '@/hooks/usePopoverHost'
-import { CpuDifficulty, GridSizeTier, KeyScheme, Player, SpeedTier, TrailGrowthTier } from '@/types'
+import { CpuDifficulty, GridSizeTier, KeyScheme, Player, PowerupType, SpeedTier, TrailGrowthTier } from '@/types'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
@@ -54,6 +55,17 @@ const TRAIL_GROWTH_OPTIONS: { value: TrailGrowthTier; label: string; description
   { value: 'fast', label: 'Fast', icon: 'seed-outline' },
   { value: 'slow', label: 'Slow', icon: 'sprout-outline' },
   { value: 'static', label: 'Static', description: 'Classic', icon: 'tree-outline' }
+]
+
+// Icons match POWERUP_ICONS exactly — the same glyph a held item shows in PowerupHud.tsx once
+// revealed, so a player who's already seen one in a HUD badge recognizes it here too.
+const POWERUP_OPTIONS: PowerupPickerOption[] = [
+  { value: 'overdrive', label: 'Overdrive', icon: POWERUP_ICONS.overdrive },
+  { value: 'stasis', label: 'Stasis', icon: POWERUP_ICONS.stasis },
+  { value: 'shield', label: 'Shield', icon: POWERUP_ICONS.shield },
+  { value: 'prune', label: 'Prune', icon: POWERUP_ICONS.prune },
+  { value: 'hack', label: 'Hack', icon: POWERUP_ICONS.hack },
+  { value: 'overclock', label: 'Overclock', icon: POWERUP_ICONS.overclock }
 ]
 
 export default function LobbyScreen() {
@@ -187,7 +199,7 @@ export default function LobbyScreen() {
 
   // Orientation is an app-wide preference now (see SettingsDialog), not a per-round choice here —
   // this row no longer takes orientationMode/orientationOptions/onOrientationChange at all.
-  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} speedRampEnabled={settings.speedRampEnabled} onToggleSpeedRamp={() => setSettings({ speedRampEnabled: !settings.speedRampEnabled })} trailGrowthTier={settings.trailGrowthTier} trailGrowthOptions={TRAIL_GROWTH_OPTIONS} onTrailGrowthChange={(value) => setSettings({ trailGrowthTier: value })} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
+  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} trailGrowthTier={settings.trailGrowthTier} trailGrowthOptions={TRAIL_GROWTH_OPTIONS} onTrailGrowthChange={(value) => setSettings({ trailGrowthTier: value })} enabledPowerups={settings.enabledPowerups} powerupOptions={POWERUP_OPTIONS} onPowerupsChange={(value: PowerupType[]) => setSettings({ enabledPowerups: value })} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.tertiary} mutedColor={fgMuted} dark={dark} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>

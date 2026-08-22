@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { resolveTurnIntent } from '@/utils/turnIntent'
+import { applyControlInversion, resolveTurnIntent } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -12,16 +12,23 @@ export interface TouchInputLayerProps {
   humanPlayers: Player[]
   enabled: boolean
   onTurn: (player: Player, direction: Direction) => void
+  // Fires the player's held powerup — see handlePointerUp/handleKeyDown below for how a tap/the
+  // activate key is told apart from a drag-to-steer/directional key.
+  onActivate: (player: Player) => void
+  controlInverted: Record<Player, boolean>
   keyScheme: Record<Player, KeyScheme>
 }
 
 // One physical-key set per scheme (see the lobby's keyboard-scheme picker) — player 1 and player 2
 // can independently pick any scheme, so the actual key -> player map below is built per-mount
-// rather than hardcoded to one fixed WASD/Arrows split.
-const KEY_SCHEME_KEYS: Record<KeyScheme, { up: string; down: string; left: string; right: string }> = {
-  wasd: { up: 'w', down: 's', left: 'a', right: 'd' },
-  arrows: { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' },
-  ijkl: { up: 'i', down: 'k', left: 'j', right: 'l' }
+// rather than hardcoded to one fixed WASD/Arrows split. `activate` is a 4th, adjacency-based
+// binding per scheme (thumb-reachable from wasd, centrally reachable from arrows, adjacent to
+// ijkl's own cluster) — distinct across all three so two local players sharing one keyboard never
+// collide, even if both happen to pick the same scheme.
+const KEY_SCHEME_KEYS: Record<KeyScheme, { up: string; down: string; left: string; right: string; activate: string }> = {
+  wasd: { up: 'w', down: 's', left: 'a', right: 'd', activate: 'q' },
+  arrows: { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', activate: ' ' },
+  ijkl: { up: 'i', down: 'k', left: 'j', right: 'l', activate: 'u' }
 }
 
 interface TrackedPointer {
@@ -34,7 +41,7 @@ interface TrackedPointer {
   lastDirection: Direction | null
 }
 
-export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, keyScheme }: TouchInputLayerProps) {
+export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, onActivate, controlInverted, keyScheme }: TouchInputLayerProps) {
   // Synthetic translation vectors, one per key, fed through the same resolveTurnIntent() every
   // other input source uses (see TouchInputLayer.tsx) rather than a separate key -> Direction
   // table — one axis/direction mapping to get right and keep tested, not two.
@@ -50,19 +57,38 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
     return map
   }, [keyScheme])
 
+  // A separate, single-purpose map (rather than folding into keyMap above) since an activate key
+  // has no translation vector of its own — it maps straight to a player, not a direction.
+  const activateKeyMap = useMemo(() => {
+    const map: Record<string, Player> = {}
+    for (const player of [1, 2] as Player[]) map[KEY_SCHEME_KEYS[keyScheme[player]].activate] = player
+    return map
+  }, [keyScheme])
+
   const playTurn = useGameSound(require('../../assets/sounds/turn.wav'), { poolSize: 8 })
+  const playActivate = useGameSound(require('../../assets/sounds/select.wav'), { poolSize: 4 })
   const { selection } = useVibration()
 
   useEffect(() => {
     if (!enabled) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const mapped = keyMap[e.key.toLowerCase()]
+      const key = e.key.toLowerCase()
+      const activatePlayer = activateKeyMap[key]
+      if (activatePlayer !== undefined && humanPlayers.includes(activatePlayer)) {
+        e.preventDefault()
+        onActivate(activatePlayer)
+        playActivate()
+        selection()
+        return
+      }
+
+      const mapped = keyMap[key]
       if (!mapped || !humanPlayers.includes(mapped.player)) return
       e.preventDefault()
       const direction = resolveTurnIntent({ player: mapped.player, translationX: mapped.translationX, translationY: mapped.translationY, orientationMode })
       if (direction) {
-        onTurn(mapped.player, direction)
+        onTurn(mapped.player, applyControlInversion(direction, controlInverted[mapped.player]))
         playTurn()
         selection()
       }
@@ -70,7 +96,7 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [enabled, humanPlayers, onTurn, keyMap, orientationMode, playTurn, selection])
+  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, keyMap, activateKeyMap, orientationMode, playTurn, playActivate, selection])
 
   // Swipe input, mirroring TouchInputLayer.tsx's Pan gestures but via raw window pointer events —
   // react-native-gesture-handler has no bearing here (RNGH ships no web target this app pulls in),
@@ -128,13 +154,22 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       tracked.baseY = e.clientY
       if (direction !== tracked.lastDirection) {
         tracked.lastDirection = direction
-        onTurn(tracked.player, direction)
+        onTurn(tracked.player, applyControlInversion(direction, controlInverted[tracked.player]))
         playTurn()
         selection()
       }
     }
 
+    // A pointer that never resolved a direction (see handlePointerMove) never moved past
+    // MIN_SWIPE_DISTANCE from where it went down — today, that's a complete no-op; here, it's the
+    // free gesture space a tap-to-activate uses. Mirrors the native file's identical onEnd check.
     const handlePointerUp = (e: PointerEvent) => {
+      const tracked = pointers.get(e.pointerId)
+      if (tracked && tracked.lastDirection === null) {
+        onActivate(tracked.player)
+        playActivate()
+        selection()
+      }
       pointers.delete(e.pointerId)
     }
 
@@ -165,7 +200,7 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       document.body.style.touchAction = previousTouchAction
       document.body.style.overscrollBehaviorX = previousOverscrollBehaviorX
     }
-  }, [enabled, humanPlayers, onTurn, orientationMode, playTurn, selection])
+  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, orientationMode, playTurn, playActivate, selection])
 
   return null
 }

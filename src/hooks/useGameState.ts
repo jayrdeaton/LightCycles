@@ -2,15 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { GRID_CELL_PX, MAX_TICK_DT_MS, scaleMsForCellPx, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_MIN_INTERVAL_MS, SPEED_TIER_INTERVAL_MS, TRAIL_GROWTH_RATE } from '@/constants/game'
 import { Direction, GameSettings, OrientationMode, Player } from '@/types'
-import { applyCpuTurn } from '@/utils/cpuAi'
-import { applyTurnIntent, buildOccupiedSet, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
+import { applyCpuActivation, applyCpuTurn } from '@/utils/cpuAi'
+import { applyActivation, applyTurnIntent, buildOccupiedSet, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
-// orientationMode is passed separately rather than read off `settings` — it's derived live from
-// the device's current physical shape (see useDeviceOrientation), not a stored setting.
-export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode) {
+// orientationMode/p1OnRight are passed separately rather than read off `settings` — they're
+// derived live from the device's current physical shape/rotation direction (see
+// useDeviceOrientation, useP1OnRight), not a stored setting.
+export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode, p1OnRight: boolean) {
   const cellPx = GRID_CELL_PX[settings.gridSizeTier]
 
-  const [state, setState] = useState(() => createInitialGameState(width, height, orientationMode, colors, cellPx))
+  const [state, setState] = useState(() => createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight))
   // The interval the *last* tick actually advanced by — exposed so the board can animate each
   // player's head gliding into its new cell over exactly that duration (see GameBoard.tsx) instead
   // of snapping, which is what made a low-ish tick rate read as choppy even though the underlying
@@ -22,13 +23,17 @@ export function useGameState(width: number, height: number, settings: GameSettin
     setState((s) => applyTurnIntent(s, player, direction))
   }, [])
 
+  const activate = useCallback((player: Player) => {
+    setState((s) => applyActivation(s, player))
+  }, [])
+
   const beginPlaying = useCallback(() => {
     setState((s) => startPlaying(s))
   }, [])
 
   const rematch = useCallback(() => {
-    setState(createInitialGameState(width, height, orientationMode, colors, cellPx))
-  }, [width, height, orientationMode, colors, cellPx])
+    setState(createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight))
+  }, [width, height, orientationMode, colors, cellPx, p1OnRight])
 
   // ─── Tick loop ──────────────────────────────────────────────────────────
   // Runs only while 'playing' (the effect's own [state.phase] dependency tears it down the
@@ -65,14 +70,19 @@ export function useGameState(width: number, height: number, settings: GameSettin
         elapsedRef.current += Math.min(dt, MAX_TICK_DT_MS)
         setTickIntervalMs(intervalMs)
         const trailGrowthRate = TRAIL_GROWTH_RATE[settings.trailGrowthTier]
+        const enabledPowerups = settings.enabledPowerups
         setState((s) => {
-          if (settings.gameMode !== 'vsCpu') return tickGame(s, undefined, trailGrowthRate)
+          if (settings.gameMode !== 'vsCpu') return tickGame(s, undefined, trailGrowthRate, enabledPowerups)
           // Built once and reused for both — see buildOccupiedSet's own comment on why this is
           // always safe, not just an optimization that happens to hold today. The CPU decides its
           // turn for THIS tick immediately before it's applied, same cadence a human's queued
           // swipe would land at, so the bot's move and the tick that consumes it commit together.
-          const occupied = buildOccupiedSet(s.players)
-          return tickGame(applyCpuTurn(s, settings.cpuDifficulty, occupied), occupied, trailGrowthRate)
+          // Activation is decided first, ahead of the turn — a Prune activation can shrink a
+          // trail, so `occupied` is rebuilt fresh afterward rather than reused stale from before it.
+          const preOccupied = buildOccupiedSet(s.players)
+          const afterActivation = enabledPowerups.length > 0 ? applyCpuActivation(s, settings.cpuDifficulty, preOccupied) : s
+          const occupied = buildOccupiedSet(afterActivation.players)
+          return tickGame(applyCpuTurn(afterActivation, settings.cpuDifficulty, occupied), occupied, trailGrowthRate, enabledPowerups)
         })
       }
 
@@ -88,7 +98,7 @@ export function useGameState(width: number, height: number, settings: GameSettin
         rafRef.current = null
       }
     }
-  }, [state.phase, settings.speedTier, settings.speedRampEnabled, settings.gameMode, settings.cpuDifficulty, settings.trailGrowthTier, cellPx])
+  }, [state.phase, settings.speedTier, settings.speedRampEnabled, settings.gameMode, settings.cpuDifficulty, settings.trailGrowthTier, settings.enabledPowerups, cellPx])
 
-  return { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx }
+  return { state, turn, activate, beginPlaying, rematch, tickIntervalMs, cellPx }
 }

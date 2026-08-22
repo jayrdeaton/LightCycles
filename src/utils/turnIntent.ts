@@ -21,6 +21,19 @@ export function resolveSwipeDirection(translationX: number, translationY: number
   return translationY > 0 ? 'down' : 'up'
 }
 
+// Hack's steering inversion, applied here in the raw screen frame (left/right swapped, up/down
+// untouched) — the same frame every input source already resolves swipes/keys in, and the same
+// frame the game engine moves the cycle in (see resolveTurnIntent's own comment on why no
+// per-orientation flip is needed). Every input source (native touch, web pointer, web keyboard)
+// and the CPU's own decision path (see cpuAi.ts's applyCpuTurn) call this identically at their own
+// single JS-thread chokepoint, rather than duplicating an if/else per call site.
+export function applyControlInversion(direction: Direction, inverted: boolean): Direction {
+  if (!inverted) return direction
+  if (direction === 'left') return 'right'
+  if (direction === 'right') return 'left'
+  return direction
+}
+
 export function flipDirection(direction: Direction): Direction {
   switch (direction) {
     case 'up':
