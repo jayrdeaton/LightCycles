@@ -79,7 +79,8 @@ describe('applyCpuTurn', () => {
         1: { trail: [{ x: 2, y: 5 }], direction: 'right', pendingDirection: null, alive: true, color: '#3B82F6' },
         2: { trail: [{ x: 7, y: 5 }], direction: 'left', pendingDirection: null, alive: true, color: '#EF4444' }
       },
-      outcome: null
+      outcome: null,
+      tick: 0
     }
   }
 

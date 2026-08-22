@@ -1,8 +1,8 @@
 import { AutoAppearancePicker, Dialog, useAutoPaperTheme } from '@rific/auto-paper'
-import { Button, Switch, useHapticSettings, useSoundSettings } from '@rific/feedback-press'
+import { Button, TouchableRipple, useHapticSettings, useSoundSettings } from '@rific/feedback-press'
 import { useUpdater } from '@rific/updater'
-import { Platform, StyleSheet, View } from 'react-native'
-import { Icon, Text } from 'react-native-paper'
+import { Platform, ScrollView, StyleSheet, View } from 'react-native'
+import { Icon, SegmentedButtons, Text } from 'react-native-paper'
 
 import { release } from '@/constants/release'
 import { GameSettings } from '@/types'
@@ -43,85 +43,72 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
   const { check, checking, updateReady } = useUpdater({ autoCheck: false, autoPrompt: false })
 
   return (
-    <Dialog visible={visible} onDismiss={onDismiss}>
+    <Dialog visible={visible} onDismiss={onDismiss} style={styles.dialog}>
       <Dialog.Title>Settings</Dialog.Title>
-      <Dialog.Content style={styles.content}>
-        <View style={styles.row}>
-          <View style={styles.rowStart}>
-            <SettingIcon source='speedometer' color={colors.primary} containerColor={colors.primaryContainer} />
-            <View style={styles.flexShrink}>
-              <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                Speed Ramp
-              </Text>
-              <Text variant='bodySmall' style={{ color: colors.onSurfaceVariant }}>
-                Speed increases as the round goes on
-              </Text>
+      <Dialog.ScrollArea>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <TouchableRipple onPress={() => setSettings({ lockOrientation: !settings.lockOrientation })} style={styles.toggleButton} accessibilityLabel={`Lock orientation ${settings.lockOrientation ? 'on' : 'off'}`}>
+            <View style={styles.toggleContent}>
+              <SettingIcon source={settings.lockOrientation ? 'lock' : 'lock-open-variant-outline'} color={settings.lockOrientation ? colors.secondary : colors.onSurfaceVariant} containerColor={settings.lockOrientation ? colors.secondaryContainer : colors.surfaceVariant} />
+              <View style={styles.flexShrink}>
+                <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                  Lock Orientation
+                </Text>
+                <Text variant='bodySmall' numberOfLines={1} style={{ color: colors.onSurfaceVariant }}>
+                  Pins the current layout
+                </Text>
+              </View>
             </View>
-          </View>
-          <Switch value={settings.speedRampEnabled} onValueChange={(value) => setSettings({ speedRampEnabled: value })} />
-        </View>
+          </TouchableRipple>
 
-        <View style={styles.row}>
-          <View style={styles.rowStart}>
-            <SettingIcon source='lock-outline' color={colors.secondary} containerColor={colors.secondaryContainer} />
-            <View style={styles.flexShrink}>
-              <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                Lock Orientation
-              </Text>
-              <Text variant='bodySmall' style={{ color: colors.onSurfaceVariant }}>
-                Pin the current layout instead of following the phone as it turns
-              </Text>
-            </View>
-          </View>
-          <Switch value={settings.lockOrientation} onValueChange={(value) => setSettings({ lockOrientation: value })} />
-        </View>
-
-        <View style={styles.section}>
-          <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
-            APPEARANCE
-          </Text>
-          <AutoAppearancePicker showLabels={false} />
-        </View>
-
-        {Platform.OS !== 'web' && (
-          <View style={styles.row}>
-            <View style={styles.rowStart}>
-              <SettingIcon source='vibrate' color={colors.secondary} containerColor={colors.secondaryContainer} />
-              <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                Haptics
-              </Text>
-            </View>
-            <Switch value={hapticSettings.vibrate} onValueChange={(value) => setHapticSettings({ vibrate: value })} />
-          </View>
-        )}
-
-        <View style={styles.row}>
-          <View style={styles.rowStart}>
-            <SettingIcon source='volume-high' color={colors.tertiary} containerColor={colors.tertiaryContainer} />
-            <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-              Sound
+          <View style={styles.section}>
+            <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
+              APPEARANCE
             </Text>
+            <AutoAppearancePicker showLabels={false} />
           </View>
-          <Switch value={soundSettings.enabled} onValueChange={(value) => setSoundSettings({ enabled: value })} />
-        </View>
 
-        <View style={styles.section}>
-          <Text variant='labelSmall' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
-            VERSION {release.otaVersion}
-            {updateReady ? ' · UPDATE READY' : ''}
-          </Text>
-          <Button mode='outlined' onPress={check} loading={checking} disabled={checking}>
-            Check for Updates
-          </Button>
-        </View>
-      </Dialog.Content>
+          <View style={styles.section}>
+            <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
+              SOUND & HAPTICS
+            </Text>
+            <SegmentedButtons
+              multiSelect
+              value={[...(soundSettings.enabled ? ['sound'] : []), ...(Platform.OS !== 'web' && hapticSettings.vibrate ? ['haptics'] : [])]}
+              onValueChange={(values) => {
+                setSoundSettings({ enabled: values.includes('sound') })
+                if (Platform.OS !== 'web') setHapticSettings({ vibrate: values.includes('haptics') })
+              }}
+              buttons={[{ value: 'sound', icon: 'volume-high', accessibilityLabel: 'Sound' }, ...(Platform.OS !== 'web' ? [{ value: 'haptics', icon: 'vibrate', accessibilityLabel: 'Haptics' }] : [])]}
+            />
+          </View>
+
+          <View style={styles.section}>
+            <Text variant='labelSmall' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
+              VERSION {release.otaVersion}
+              {updateReady ? ' · UPDATE READY' : ''}
+            </Text>
+            <Button mode='outlined' onPress={check} loading={checking} disabled={checking}>
+              Check for Updates
+            </Button>
+          </View>
+        </ScrollView>
+      </Dialog.ScrollArea>
     </Dialog>
   )
 }
 
 const styles = StyleSheet.create({
   content: {
-    gap: 24
+    gap: 24,
+    paddingVertical: 20
+  },
+  // Caps the card so it never grows past the screen — without this the dialog just keeps
+  // growing to fit its content and the overflow gets clipped by the screen edge, which is
+  // what happened in landscape where there's less height to work with. Dialog.ScrollArea +
+  // ScrollView below then take over and let the content scroll within that bound.
+  dialog: {
+    maxHeight: '90%'
   },
   flexShrink: {
     flexShrink: 1
@@ -133,21 +120,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36
   },
-  row: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between'
-  },
-  rowStart: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 1,
-    gap: 12
-  },
   section: {
     gap: 12
   },
   sectionLabel: {
     letterSpacing: 2
+  },
+  // Negative margin cancels the padding so the icon still lines up with APPEARANCE/SOUND &
+  // HAPTICS below, while the ripple/hover highlight itself gets room to breathe on both sides
+  // instead of a flush edge-to-edge slab. overflow: 'hidden' makes sure that highlight actually
+  // clips to borderRadius instead of drawing as a plain rectangle.
+  toggleButton: {
+    borderRadius: 12,
+    marginHorizontal: -12,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  toggleContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
   }
 })

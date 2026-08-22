@@ -10,6 +10,8 @@ import { resolveTurnIntent } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
+  // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
+  p1OnRight: boolean
   // [1, 2] for pass-and-play (the usual two-zone split below); [1] or [2] for vs-CPU, where the
   // single human gets the whole board as their input area — see the solo branch below.
   humanPlayers: Player[]
@@ -27,7 +29,7 @@ export interface TouchInputLayerProps {
 // testing against that region, using each touch's start coordinate, IS the "classify by start
 // coordinate, not continuous tracking" the plan calls for; there's no extra manual classification
 // to write. The canvas underneath stays one undivided render — only touch handling is zoned.
-export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn }: TouchInputLayerProps) {
+export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlayers, enabled, onTurn }: TouchInputLayerProps) {
   const [size, setSize] = useState({ width: 0, height: 0 })
   const solo = humanPlayers.length === 1
 
@@ -100,13 +102,16 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
 
     // Face-to-face: top/bottom split (player 1 = near/bottom zone, since player 1 is assumed to be
     // the device's owner and the near zone faces them; player 2 = far/top zone).
-    // Side-by-side (and web's shared layout): left/right split (player 1 = left, player 2 = right).
-    const p1Pan = orientationMode === 'faceToFace' ? makePlayerPan(1, p1Base, p1LastDirection, { top: -(size.height / 2) }) : makePlayerPan(1, p1Base, p1LastDirection, { right: -(size.width / 2) })
-    const p2Pan = orientationMode === 'faceToFace' ? makePlayerPan(2, p2Base, p2LastDirection, { bottom: -(size.height / 2) }) : makePlayerPan(2, p2Base, p2LastDirection, { left: -(size.width / 2) })
+    // Side-by-side (and web's shared layout): whichever player is on the right (see useP1OnRight)
+    // gets the right zone — matches GameBoard.tsx's identical wallPath split.
+    const p1HitSlop = p1OnRight ? { left: -(size.width / 2) } : { right: -(size.width / 2) }
+    const p2HitSlop = p1OnRight ? { right: -(size.width / 2) } : { left: -(size.width / 2) }
+    const p1Pan = orientationMode === 'faceToFace' ? makePlayerPan(1, p1Base, p1LastDirection, { top: -(size.height / 2) }) : makePlayerPan(1, p1Base, p1LastDirection, p1HitSlop)
+    const p2Pan = orientationMode === 'faceToFace' ? makePlayerPan(2, p2Base, p2LastDirection, { bottom: -(size.height / 2) }) : makePlayerPan(2, p2Base, p2LastDirection, p2HitSlop)
 
     return Gesture.Simultaneous(p1Pan, p2Pan)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- p1Base/p2Base/p1LastDirection/p2LastDirection are stable SharedValue refs (like useRef), not reactive state
-  }, [size, orientationMode, humanPlayers, solo, enabled, handleTurn])
+  }, [size, orientationMode, p1OnRight, humanPlayers, solo, enabled, handleTurn])
 
   if (!gesture) {
     return <View style={StyleSheet.absoluteFill} onLayout={onLayout} />

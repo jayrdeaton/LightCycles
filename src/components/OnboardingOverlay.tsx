@@ -9,6 +9,8 @@ import { OrientationMode, Player, RoundOutcome } from '@/types'
 
 export interface OnboardingOverlayProps {
   orientationMode: OrientationMode
+  // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
+  p1OnRight: boolean
   humanPlayers: Player[]
   p1Color: string
   p2Color: string
@@ -32,7 +34,7 @@ const COUNTDOWN_STAGES = ['3', '2', '1', 'GO!']
 // right-side-up from that player's actual physical side of the device rather than upside-down.
 // Solo (vs CPU) gets a single full-board zone — TouchInputLayer never splits the board when
 // there's only one human to swipe on it. The whole thing fades out and calls onComplete.
-export default function OnboardingOverlay({ orientationMode, humanPlayers, p1Color, p2Color, roundHistory, onComplete }: OnboardingOverlayProps) {
+export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPlayers, p1Color, p2Color, roundHistory, onComplete }: OnboardingOverlayProps) {
   const opacity = useSharedValue(1)
   const [stageIndex, setStageIndex] = useState(0)
 
@@ -73,6 +75,10 @@ export default function OnboardingOverlay({ orientationMode, humanPlayers, p1Col
 
   const isFaceToFace = orientationMode === 'faceToFace'
   const countdown = COUNTDOWN_STAGES[stageIndex]
+  // Side-by-side: whichever player is on the right (see useP1OnRight) gets the right zone —
+  // matches GameBoard.tsx's identical wallPath split.
+  const p1Zone = isFaceToFace ? styles.zoneBottom : p1OnRight ? styles.zoneRight : styles.zoneLeft
+  const p2Zone = isFaceToFace ? styles.zoneTop : p1OnRight ? styles.zoneLeft : styles.zoneRight
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents='none'>
@@ -92,10 +98,10 @@ export default function OnboardingOverlay({ orientationMode, humanPlayers, p1Col
         </View>
       ) : (
         <>
-          <View style={[styles.zone, isFaceToFace ? styles.zoneBottom : styles.zoneLeft, { borderColor: p1Color, backgroundColor: `${p1Color}22` }]}>
+          <View style={[styles.zone, p1Zone, { borderColor: p1Color, backgroundColor: `${p1Color}22` }]}>
             <Text style={styles.countdown}>{countdown}</Text>
           </View>
-          <View style={[styles.zone, isFaceToFace ? styles.zoneTop : styles.zoneRight, { borderColor: p2Color, backgroundColor: `${p2Color}22` }]}>
+          <View style={[styles.zone, p2Zone, { borderColor: p2Color, backgroundColor: `${p2Color}22` }]}>
             <Text style={[styles.countdown, isFaceToFace && styles.countdownFlipped]}>{countdown}</Text>
           </View>
 

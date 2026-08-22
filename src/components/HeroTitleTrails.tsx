@@ -26,13 +26,18 @@ const HEAD_RING_WIDTH = 1.5
 // A settled (non-animating) trail reads at the same dimmed opacity GameBoard.tsx uses for a
 // round-over dead trail, rather than full brightness sitting still.
 const STATIC_TRAIL_OPACITY = 0.6
-// Trail length is a fraction of the SHORTER word's own perimeter, then shared as one absolute px
-// length by both words — not a fraction applied independently to each word's own perimeter, which
-// is what let "Cycles" (the longer loop) carry a longer trail in absolute px, reaching further past
-// the shared corner and into "Light"'s territory. Measured against the actual rendered boxes at
-// render time (see rectPerimeter below) rather than a guessed px constant — a guessed value
-// silently stops matching reality if the font/copy ever changes, with no error to catch it.
+// Trail length is a fraction of the SHORTER word's own perimeter, then shared as one base absolute
+// px length by both words — not a fraction applied independently to each word's own perimeter,
+// which is what let "Cycles" (the longer loop) carry a longer trail in absolute px, reaching
+// further past the shared corner and into "Light"'s territory. Measured against the actual
+// rendered boxes at render time (see rectPerimeter below) rather than a guessed px constant — a
+// guessed value silently stops matching reality if the font/copy ever changes, with no error to
+// catch it.
 const TRAIL_LENGTH_FRACTION = 0.44
+// Cycles' own trail is nudged a hair past that shared base — small enough to still read as "the
+// same length" at a glance, unlike TRAIL_LENGTH_FRACTION applied per-word above, which is the
+// disproportionate version this is deliberately not doing.
+const CYCLES_TRAIL_LENGTH_BONUS_FRACTION = 0.28
 // Both words share one lap duration rather than one px/sec speed, so their revolutions stay in
 // sync — "Cycles" has a longer perimeter than "Light", so it moves faster to cover it in the same
 // time instead of drifting in and out of phase with a shared px/sec pace.
@@ -167,19 +172,23 @@ function WordTrail({ box, color, clockwise, active, trailLengthPx, startDelayMs 
 }
 
 export function HeroTitleTrails({ lightBox, cyclesBox, p1Color, p2Color, active, startDelayMs }: HeroTitleTrailsProps) {
-  const trailLengthPx = useMemo(() => {
+  const { lightTrailLengthPx, cyclesTrailLengthPx } = useMemo(() => {
     const lightSize = wordTrailSize(lightBox)
     const cyclesSize = wordTrailSize(cyclesBox)
     const lightPerimeter = rectPerimeter(lightSize.width, lightSize.height)
     const cyclesPerimeter = rectPerimeter(cyclesSize.width, cyclesSize.height)
-    return TRAIL_LENGTH_FRACTION * Math.min(lightPerimeter, cyclesPerimeter)
+    const baseTrailLengthPx = TRAIL_LENGTH_FRACTION * Math.min(lightPerimeter, cyclesPerimeter)
+    return {
+      lightTrailLengthPx: baseTrailLengthPx,
+      cyclesTrailLengthPx: baseTrailLengthPx * (1 + CYCLES_TRAIL_LENGTH_BONUS_FRACTION),
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightBox.width, lightBox.height, cyclesBox.width, cyclesBox.height])
 
   return (
     <Canvas style={StyleSheet.absoluteFill}>
-      <WordTrail box={lightBox} color={p1Color} clockwise={true} active={active} trailLengthPx={trailLengthPx} startDelayMs={startDelayMs} />
-      <WordTrail box={cyclesBox} color={p2Color} clockwise={false} active={active} trailLengthPx={trailLengthPx} startDelayMs={startDelayMs} />
+      <WordTrail box={lightBox} color={p1Color} clockwise={true} active={active} trailLengthPx={lightTrailLengthPx} startDelayMs={startDelayMs} />
+      <WordTrail box={cyclesBox} color={p2Color} clockwise={false} active={active} trailLengthPx={cyclesTrailLengthPx} startDelayMs={startDelayMs} />
     </Canvas>
   )
 }

@@ -1,4 +1,3 @@
-import { START_MARGIN_CELLS } from '@/constants/game'
 import { Direction, GridCell, GridSize, OrientationMode, Player } from '@/types'
 
 export const ALL_DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
@@ -46,17 +45,23 @@ export function isOppositeDirection(a: Direction, b: Direction): boolean {
 // owner, so in face-to-face they get the "near" bottom zone (the natural portrait orientation
 // faces them) while player 2 is the "far" player (top zone, needs the input flip — see
 // utils/turnIntent.ts); in side-by-side/web, player 1 is the "left" player.
+//
+// Each player starts at the dead center of their own half of the board (their "zone" — see
+// GameBoard.tsx/TouchInputLayer.tsx's identical split) rather than hugging the outer wall. That
+// keeps the two players closer together at the start and leaves a full quarter-board of room
+// behind each of them to maneuver into.
 export function startingStateFor(player: Player, grid: GridSize, mode: OrientationMode): { head: GridCell; direction: Direction } {
-  // Clamped at 0 — on a degenerate ≤2-cell-wide/tall board (an extreme layout state; not a normal
-  // device size) the unclamped math goes negative, placing a head off-grid before the round even
-  // starts.
-  const margin = Math.max(0, Math.min(START_MARGIN_CELLS, Math.floor((mode === 'faceToFace' ? grid.rows : grid.cols) / 2) - 1))
+  const axisLength = mode === 'faceToFace' ? grid.rows : grid.cols
+  const firstHalfLength = Math.floor(axisLength / 2)
+  // Center of the [0, firstHalfLength) zone and center of the [firstHalfLength, axisLength) zone.
+  const firstZoneCenter = Math.floor(firstHalfLength / 2)
+  const secondZoneCenter = firstHalfLength + Math.floor((axisLength - firstHalfLength) / 2)
 
   if (mode === 'faceToFace') {
     const x = Math.floor(grid.cols / 2)
-    return player === 2 ? { head: { x, y: margin }, direction: 'down' } : { head: { x, y: grid.rows - 1 - margin }, direction: 'up' }
+    return player === 2 ? { head: { x, y: firstZoneCenter }, direction: 'down' } : { head: { x, y: secondZoneCenter }, direction: 'up' }
   }
 
   const y = Math.floor(grid.rows / 2)
-  return player === 1 ? { head: { x: margin, y }, direction: 'right' } : { head: { x: grid.cols - 1 - margin, y }, direction: 'left' }
+  return player === 1 ? { head: { x: firstZoneCenter, y }, direction: 'right' } : { head: { x: secondZoneCenter, y }, direction: 'left' }
 }

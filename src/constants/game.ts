@@ -1,4 +1,4 @@
-import { GridSizeTier, SpeedTier } from '@/types'
+import { GridSizeTier, SpeedTier, TrailGrowthTier } from '@/types'
 
 // Grid cell edge length in px per tier — cols/rows are derived from the safe area at this
 // resolution (see utils/grid.ts). Matches the lobby's small/medium/large vehicle icons literally:
@@ -35,6 +35,18 @@ export const SPEED_RAMP_INTERVAL_MS = 6000
 export const SPEED_RAMP_DECREMENT_MS = 7
 export const SPEED_RAMP_MIN_INTERVAL_MS = 26
 
+// Net trail-length growth per tick, as a fraction of the append rate (see gameEngine.ts's
+// shouldTrimTrailAt). 'static' (1) is the original behavior: the tail never follows, so the trail
+// is the entire path since spawn, appended every tick and never trimmed. Below that, the tail
+// follows — trimmed off the front on enough ticks to hold the trail's long-run growth at this
+// fraction — so the board still inevitably fills in (same as 'static', just delayed) rather than
+// settling into a fixed-length trail players could dodge forever.
+export const TRAIL_GROWTH_RATE: Record<TrailGrowthTier, number> = {
+  fast: 0.25,
+  slow: 0.5,
+  static: 1
+}
+
 // Rescales a ms value tuned at GRID_CELL_PX.medium to the active cell size, preserving on-screen
 // px/sec pace: ms/tick scales linearly with px/tick (== cellPx), so px/sec cancels out to a
 // constant regardless of which grid-size tier is active.
@@ -49,10 +61,6 @@ export function scaleMsForCellPx(referenceMs: number, cellPx: number): number {
 // speed the instant play resumes.
 export const MAX_TICK_DT_MS = 250
 
-// Starting distance (in cells) from the grid edge to each player's initial head position along the
-// movement axis — far enough that neither player can flick into a wall on the very first tick.
-export const START_MARGIN_CELLS = 4
-
 // Onboarding zone overlay (see OnboardingOverlay.tsx): a "3, 2, 1, GO!" countdown, each digit
 // held for ONBOARDING_COUNTDOWN_STEP_MS and "GO!" held for ONBOARDING_GO_HOLD_MS, then fades out
 // over ONBOARDING_FADE_MS. The game loop itself doesn't start ticking until the fade completes,
@@ -65,6 +73,13 @@ export const ONBOARDING_GO_HOLD_MS = 500
 // it gets covered up.
 export const ROUND_OVER_DIALOG_DELAY_MS = 700
 export const ONBOARDING_FADE_MS = 300
+
+// Lobby player-panel area (see lobby.tsx): whenever a real device rotation changes orientationMode
+// or which physical side P1 lands on (see useP1OnRight), the panels fade out, the layout
+// underneath swaps while invisible, then they fade back in — masking what would otherwise be an
+// instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is masking
+// a reflow that already happened at the OS's own pace, not a deliberate reveal like onboarding's.
+export const LOBBY_PANEL_SWAP_FADE_MS = 180
 
 // Matches @rific/auto-paper's ColorPicker defaultColors swatches exactly ('Blue' / 'Red') so a
 // player who hasn't customized their color yet sees it correctly highlighted/checked in the

@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   gameMode: 'twoPlayer',
   cpuDifficulty: 'normal',
   gridSizeTier: DEFAULT_GRID_SIZE_TIER,
+  trailGrowthTier: 'static',
   keyScheme: { 1: 'wasd', 2: 'arrows' },
   lockOrientation: false
 }
@@ -21,5 +22,5 @@ function isValidKeyScheme(value: unknown): value is KeyScheme {
 export function isValidSettings(value: unknown): value is GameSettings {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<GameSettings>
-  return (v.speedTier === 'slow' || v.speedTier === 'normal' || v.speedTier === 'fast') && typeof v.speedRampEnabled === 'boolean' && (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.cpuDifficulty === 'easy' || v.cpuDifficulty === 'normal' || v.cpuDifficulty === 'hard') && (v.gridSizeTier === 'small' || v.gridSizeTier === 'medium' || v.gridSizeTier === 'large') && !!v.keyScheme && isValidKeyScheme(v.keyScheme[1]) && isValidKeyScheme(v.keyScheme[2]) && typeof v.lockOrientation === 'boolean'
+  return (v.speedTier === 'slow' || v.speedTier === 'normal' || v.speedTier === 'fast') && typeof v.speedRampEnabled === 'boolean' && (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.cpuDifficulty === 'easy' || v.cpuDifficulty === 'normal' || v.cpuDifficulty === 'hard') && (v.gridSizeTier === 'small' || v.gridSizeTier === 'medium' || v.gridSizeTier === 'large') && (v.trailGrowthTier === 'fast' || v.trailGrowthTier === 'slow' || v.trailGrowthTier === 'static') && !!v.keyScheme && isValidKeyScheme(v.keyScheme[1]) && isValidKeyScheme(v.keyScheme[2]) && typeof v.lockOrientation === 'boolean'
 }

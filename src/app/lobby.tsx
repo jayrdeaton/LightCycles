@@ -3,17 +3,20 @@ import { IconButton } from '@rific/feedback-press'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
+import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LobbySharedControls } from '@/components/LobbySharedControls'
 import { ReadyButton } from '@/components/ReadyButton'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { LOBBY_PANEL_SWAP_FADE_MS } from '@/constants/game'
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
+import { useP1OnRight } from '@/hooks/useP1OnRight'
 import { usePopoverHost } from '@/hooks/usePopoverHost'
-import { CpuDifficulty, GridSizeTier, KeyScheme, Player, SpeedTier } from '@/types'
+import { CpuDifficulty, GridSizeTier, KeyScheme, Player, SpeedTier, TrailGrowthTier } from '@/types'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
@@ -39,6 +42,20 @@ const CPU_DIFFICULTY_OPTIONS: { value: CpuDifficulty; label: string; icon: strin
   { value: 'hard', label: 'Hard', icon: 'emoticon-devil-outline' }
 ]
 
+// Small -> full growth stages, echoing the same playful-tier convention as the other rows. Named
+// for how fast the tail follows the head, not the outcome — a "Short"/"Full"-style outcome label
+// implied a fixed length the trail settles at, but it never actually does under any tier (still
+// grows without bound, just slower than 1:1 when the tail follows — see gameEngine.ts's
+// shouldTrimTrailAt). No description text on fast/slow (same as grid size/speed/CPU difficulty
+// above) — players learn what each does by trying it. 'static' gets one anyway: it's the game's
+// original behavior, and "this is the one you already know" is useful context a blind try can't
+// give you, unlike fast/slow which are self-explanatory enough to just test.
+const TRAIL_GROWTH_OPTIONS: { value: TrailGrowthTier; label: string; description?: string; icon: string }[] = [
+  { value: 'fast', label: 'Fast', icon: 'seed-outline' },
+  { value: 'slow', label: 'Slow', icon: 'sprout-outline' },
+  { value: 'static', label: 'Static', description: 'Classic', icon: 'tree-outline' }
+]
+
 export default function LobbyScreen() {
   // Read only from this screen's own route param, never from useGameSettings().gameMode — the
   // settings hook's AsyncStorage read is async, and racing it here could momentarily show the
@@ -55,8 +72,49 @@ export default function LobbyScreen() {
   // two panels into a portrait-narrow row — and for vs-CPU, it's simply whichever way the solo
   // player is holding it. Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
   const orientationMode = useDeviceOrientation()
-  const isSideBySide = orientationMode === 'sideBySide'
   useOrientationLock(settings.lockOrientation, orientationMode)
+  const { p1OnRight, resolved: p1OnRightResolved } = useP1OnRight()
+
+  // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
+  // behind the live orientationMode/p1OnRight above — see panelOpacity below. Everything else on
+  // this screen (the back/settings buttons, shared controls, Ready button) reads the live values
+  // directly and never re-positions, so nothing about it needs masking.
+  const [panelLayout, setPanelLayout] = useState({ orientationMode, p1OnRight })
+  const panelOpacity = useSharedValue(1)
+  // Both directions live in this one reaction (panelOpacity's only writer — see HeroTitleTrails.tsx's
+  // identical one-writer-per-value note) rather than a useEffect for the fade-out plus a second
+  // reaction for the fade-in. That split would let the fade-in start climbing back to 1 the instant
+  // setPanelLayout is *called*, racing ahead of the JS-thread commit that actually mounts the new
+  // branch/order — the exact bug this whole feature exists to avoid. Comparing live values against
+  // the already-committed panelLayout instead means the fade-in only fires once they've caught up,
+  // i.e. once the new layout is actually the one on screen.
+  //
+  // The 'unresolved' phase exists so a fresh navigation to this screen doesn't itself fade: p1OnRight
+  // starts as a guess (see useP1OnRight) and corrects itself moments later once its own initial
+  // orientation check resolves — that correction isn't a real rotation, so it snaps straight to the
+  // right layout instead of fading like an actual mid-lobby rotation would.
+  useAnimatedReaction(
+    () => {
+      if (!p1OnRightResolved) return 'unresolved'
+      return `${orientationMode}:${p1OnRight}` === `${panelLayout.orientationMode}:${panelLayout.p1OnRight}` ? 'match' : 'mismatch'
+    },
+    (phase, previousPhase) => {
+      if (previousPhase === null || phase === previousPhase) return
+      if (phase === 'match') {
+        if (previousPhase === 'mismatch') panelOpacity.value = withTiming(1, { duration: LOBBY_PANEL_SWAP_FADE_MS })
+        return
+      }
+      if (previousPhase === 'unresolved') {
+        runOnJS(setPanelLayout)({ orientationMode, p1OnRight })
+        return
+      }
+      panelOpacity.value = withTiming(0, { duration: LOBBY_PANEL_SWAP_FADE_MS }, (finished) => {
+        if (finished) runOnJS(setPanelLayout)({ orientationMode, p1OnRight })
+      })
+    }
+  )
+  const panelFadeStyle = useAnimatedStyle(() => ({ opacity: panelOpacity.value }))
+  const isSideBySide = panelLayout.orientationMode === 'sideBySide'
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const insets = useSafeAreaInsets()
@@ -108,7 +166,7 @@ export default function LobbyScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const p2IsHuman = humanPlayers.includes(2)
-  const isFaceToFace = orientationMode === 'faceToFace'
+  const isFaceToFace = panelLayout.orientationMode === 'faceToFace'
 
   // Vs-CPU only has one human slot, so its Ready toggle renders standalone below both panels
   // instead of embedded in P1's own panel — see the solo layout below.
@@ -122,18 +180,14 @@ export default function LobbyScreen() {
   // since two real people editing at once is the whole point there.
   const controlsHost = usePopoverHost()
   const sharedHost = gameMode === 'vsCpu' ? controlsHost : undefined
-  // P2 sits at (or near) the screen's right edge in every layout except face-to-face's centered
-  // top zone (where align is inconsequential either way, since a rotated, centered trigger has
-  // roughly equal room on both sides) — 'right' keeps its own popovers from overflowing off that
-  // edge.
   const p1Panel = <LobbyPlayerPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman keyScheme={settings.keyScheme[1]} onKeySchemeChange={(scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 1: scheme } })} otherKeyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} />
-  // Only two-player's P2 sits at (or near) the screen's right edge — vs-CPU's CPU panel stays well
-  // clear of it even in the side-by-side layout, so it centers like P1's does.
-  const p2Panel = <LobbyPlayerPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} onKeySchemeChange={p2IsHuman ? (scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 2: scheme } }) : undefined} otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} align={gameMode === 'twoPlayer' ? 'right' : undefined} />
+  // P2/CPU centers its own popovers just like P1 — playersRowSpaced's gap already keeps it clear of
+  // the screen's right edge (see that style's own comment), so there's no overflow to guard against.
+  const p2Panel = <LobbyPlayerPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} onKeySchemeChange={p2IsHuman ? (scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 2: scheme } }) : undefined} otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} />
 
   // Orientation is an app-wide preference now (see SettingsDialog), not a per-round choice here —
   // this row no longer takes orientationMode/orientationOptions/onOrientationChange at all.
-  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
+  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} speedRampEnabled={settings.speedRampEnabled} onToggleSpeedRamp={() => setSettings({ speedRampEnabled: !settings.speedRampEnabled })} trailGrowthTier={settings.trailGrowthTier} trailGrowthOptions={TRAIL_GROWTH_OPTIONS} onTrailGrowthChange={(value) => setSettings({ trailGrowthTier: value })} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
@@ -150,9 +204,9 @@ export default function LobbyScreen() {
           // shared title above both would only ever read right-side-up for one of them, so there
           // isn't one here.
           <View style={styles.dualZone}>
-            <View style={styles.rotated180}>{p2Panel}</View>
+            <Animated.View style={[styles.rotated180, panelFadeStyle]}>{p2Panel}</Animated.View>
             {sharedControls}
-            {p1Panel}
+            <Animated.View style={panelFadeStyle}>{p1Panel}</Animated.View>
           </View>
         ) : (
           // Side-by-side: both players sit shoulder-to-shoulder, so the shared controls sit in
@@ -163,10 +217,10 @@ export default function LobbyScreen() {
           // rather than the cramped, barely-gapped columns a portrait split would force.
           <View style={styles.stackedZone}>
             {sharedControls}
-            <View style={[styles.playersRow, styles.playersRowSpaced]}>
-              {p1Panel}
-              {p2Panel}
-            </View>
+            <Animated.View style={[styles.playersRow, styles.playersRowSpaced, panelFadeStyle]}>
+              {panelLayout.p1OnRight ? p2Panel : p1Panel}
+              {panelLayout.p1OnRight ? p1Panel : p2Panel}
+            </Animated.View>
           </View>
         )
       ) : (
@@ -179,10 +233,10 @@ export default function LobbyScreen() {
           also shares this host, and elevating this row for *its* popovers too would tie the two,
           letting DOM order wrongly decide which one paints on top (see LobbyPlayerPanel and
           LobbySharedControls' matching ownPopoverOpen checks). */}
-          <View style={[styles.playersRow, isSideBySide && styles.playersRowSpaced, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen]}>
-            {p1Panel}
-            {p2Panel}
-          </View>
+          <Animated.View style={[styles.playersRow, isSideBySide && styles.playersRowSpaced, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen, panelFadeStyle]}>
+            {isSideBySide && panelLayout.p1OnRight ? p2Panel : p1Panel}
+            {isSideBySide && panelLayout.p1OnRight ? p1Panel : p2Panel}
+          </Animated.View>
           <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} />
         </View>
       )}

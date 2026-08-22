@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { GRID_CELL_PX, MAX_TICK_DT_MS, scaleMsForCellPx, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_MIN_INTERVAL_MS, SPEED_TIER_INTERVAL_MS } from '@/constants/game'
+import { GRID_CELL_PX, MAX_TICK_DT_MS, scaleMsForCellPx, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_MIN_INTERVAL_MS, SPEED_TIER_INTERVAL_MS, TRAIL_GROWTH_RATE } from '@/constants/game'
 import { Direction, GameSettings, OrientationMode, Player } from '@/types'
 import { applyCpuTurn } from '@/utils/cpuAi'
 import { applyTurnIntent, buildOccupiedSet, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
@@ -64,14 +64,15 @@ export function useGameState(width: number, height: number, settings: GameSettin
         // resumes); only how much of it counts toward the ramp is bounded.
         elapsedRef.current += Math.min(dt, MAX_TICK_DT_MS)
         setTickIntervalMs(intervalMs)
+        const trailGrowthRate = TRAIL_GROWTH_RATE[settings.trailGrowthTier]
         setState((s) => {
-          if (settings.gameMode !== 'vsCpu') return tickGame(s)
+          if (settings.gameMode !== 'vsCpu') return tickGame(s, undefined, trailGrowthRate)
           // Built once and reused for both — see buildOccupiedSet's own comment on why this is
           // always safe, not just an optimization that happens to hold today. The CPU decides its
           // turn for THIS tick immediately before it's applied, same cadence a human's queued
           // swipe would land at, so the bot's move and the tick that consumes it commit together.
           const occupied = buildOccupiedSet(s.players)
-          return tickGame(applyCpuTurn(s, settings.cpuDifficulty, occupied), occupied)
+          return tickGame(applyCpuTurn(s, settings.cpuDifficulty, occupied), occupied, trailGrowthRate)
         })
       }
 
@@ -87,7 +88,7 @@ export function useGameState(width: number, height: number, settings: GameSettin
         rafRef.current = null
       }
     }
-  }, [state.phase, settings.speedTier, settings.speedRampEnabled, settings.gameMode, settings.cpuDifficulty, cellPx])
+  }, [state.phase, settings.speedTier, settings.speedRampEnabled, settings.gameMode, settings.cpuDifficulty, settings.trailGrowthTier, cellPx])
 
   return { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx }
 }

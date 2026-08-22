@@ -16,6 +16,7 @@ import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
+import { useP1OnRight } from '@/hooks/useP1OnRight'
 import { GameSettings, OrientationMode, Player, RoundOutcome } from '@/types'
 import { humanPlayersFor } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
@@ -26,6 +27,13 @@ interface GameRoundProps {
   settings: GameSettings
   colors: Record<Player, string>
   orientationMode: OrientationMode
+  // Only meaningful when orientationMode === 'sideBySide' — see useP1OnRight. Read once, at mount,
+  // via GameRound's own lazy useState below rather than as a live value: unlike a portrait<->
+  // landscape change, a LANDSCAPE_LEFT<->LANDSCAPE_RIGHT flip doesn't change the board's measured
+  // size, so it wouldn't trip the resize-remount below — without freezing it, the sides could swap
+  // out from under the players mid-round on a 180° turn, exactly what the unconditional
+  // useOrientationLock below is otherwise trying to prevent.
+  p1OnRight: boolean
 }
 
 // Split out from GameScreen so useGameState's lazy initial state (see useGameState.ts) is always
@@ -34,9 +42,10 @@ interface GameRoundProps {
 // only ever runs once per mount. Keyed by its own size so a genuine resize (in practice only
 // possible on web, since native orientation is locked — see useOrientationLock) remounts a fresh
 // round at the new size instead of rendering a stale grid against a differently-sized container.
-function GameRound({ width, height, settings, colors, orientationMode }: GameRoundProps) {
+function GameRound({ width, height, settings, colors, orientationMode, p1OnRight: p1OnRightAtMount }: GameRoundProps) {
   const { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode)
   const humanPlayers = useMemo(() => humanPlayersFor(settings), [settings])
+  const [p1OnRight] = useState(p1OnRightAtMount)
 
   // The persisted, cross-round defaults (not this round's already-locked-in `settings` prop above)
   // — matches every other screen's settings button, which always edits "next time," never the
@@ -141,14 +150,14 @@ function GameRound({ width, height, settings, colors, orientationMode }: GameRou
 
   return (
     <>
-      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} />
-      <TouchInputLayer orientationMode={orientationMode} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} keyScheme={settings.keyScheme} />
+      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} />
+      <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} keyScheme={settings.keyScheme} />
 
       {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown
       timers are scheduled once on mount with no pause hook of their own, so unmounting is what
       stops them ticking underneath the dialog, and remounting on close is what restarts the count
       from '3' instead of resuming mid-count with stale timers. */}
-      {state.phase === 'onboarding' && !settingsOpen && <OnboardingOverlay orientationMode={orientationMode} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
+      {state.phase === 'onboarding' && !settingsOpen && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
 
       {state.phase === 'roundOver' && showResultDialog && !resultPeeked && (
         <View style={styles.overlay}>
@@ -204,10 +213,15 @@ export default function GameScreen() {
     if (!settings) router.replace('/')
   }, [settings])
 
-  // orientationMode just follows the device's current physical shape (see useDeviceOrientation) —
-  // Lock Orientation (an app-wide preference, see SettingsDialog) is the opt-in for pinning it.
+  // orientationMode follows the device's current physical shape (see useDeviceOrientation), but
+  // once a round is on screen it's always pinned to whatever that was at mount — unconditionally,
+  // regardless of the Lock Orientation setting below. A genuine mid-round rotation changes the
+  // board area's measured size, which trips BOARD_RESIZE_THRESHOLD_PX's remount logic and would
+  // otherwise blow away the round in progress; Lock Orientation (an app-wide preference, see
+  // SettingsDialog) only governs free rotation on every *other* screen.
   const orientationMode = useDeviceOrientation()
-  useOrientationLock(settings?.lockOrientation ?? false, orientationMode)
+  useOrientationLock(true, orientationMode)
+  const { p1OnRight } = useP1OnRight()
 
   const insets = useSafeAreaInsets()
   const { colors: themeColors, dark } = useAutoPaperTheme()
@@ -236,7 +250,7 @@ export default function GameScreen() {
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
       <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
-        {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} orientationMode={orientationMode} />}
+        {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} orientationMode={orientationMode} p1OnRight={p1OnRight} />}
       </View>
     </View>
   )

@@ -10,7 +10,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
       1: { trail: [{ x: 2, y: 5 }], direction: 'right', pendingDirection: null, alive: true, color: '#3B82F6' },
       2: { trail: [{ x: 7, y: 5 }], direction: 'left', pendingDirection: null, alive: true, color: '#EF4444' }
     },
-    outcome: null
+    outcome: null,
+    tick: 0
   }
   return { ...base, ...overrides }
 }
@@ -181,6 +182,47 @@ describe('tickGame', () => {
   it('is a no-op once the round is already over', () => {
     const state = makeState({ phase: 'roundOver', outcome: { type: 'draw' } })
     expect(tickGame(state)).toBe(state)
+  })
+
+  // Both players head 'up' in parallel, 5 columns apart — never cross or catch each other, so
+  // every tick below stays crash-free out to the tested tick count.
+  function makeParallelState(): GameState {
+    return makeState({
+      players: {
+        1: { trail: [{ x: 2, y: 9 }], direction: 'up', pendingDirection: null, alive: true, color: '#3B82F6' },
+        2: { trail: [{ x: 7, y: 9 }], direction: 'up', pendingDirection: null, alive: true, color: '#EF4444' }
+      }
+    })
+  }
+
+  it('increments tick every advancing call, defaulting trailGrowthRate to 1 (never trims)', () => {
+    let state = makeParallelState()
+    for (let i = 1; i <= 4; i++) {
+      state = tickGame(state)
+      expect(state.tick).toBe(i)
+      expect(state.players[1].trail).toHaveLength(i + 1)
+    }
+  })
+
+  it('trims the trail tail on ticks needed to hold a sub-1 trailGrowthRate, keeping length below tick count', () => {
+    let state = makeParallelState()
+    for (let i = 0; i < 8; i++) {
+      state = tickGame(state, undefined, 0.5)
+    }
+    // 8 ticks at a 0.5 growth rate: 4 trims, net length = 1 (start) + 8 (appends) - 4 (trims) = 5.
+    expect(state.players[1].trail).toHaveLength(5)
+    expect(state.players[2].trail).toHaveLength(5)
+  })
+
+  it('never trims on the tick a player crashes, even under a sub-1 trailGrowthRate', () => {
+    const state = makeState({
+      players: {
+        1: { trail: [{ x: 0, y: 5 }], direction: 'left', pendingDirection: null, alive: true, color: '#3B82F6' },
+        2: { trail: [{ x: 7, y: 5 }], direction: 'left', pendingDirection: null, alive: true, color: '#EF4444' }
+      }
+    })
+    const next = tickGame(state, undefined, 0.5)
+    expect(next.players[1].trail).toEqual([{ x: 0, y: 5 }])
   })
 })
 

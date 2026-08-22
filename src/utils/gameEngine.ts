@@ -1,5 +1,5 @@
 import { SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
-import { Direction, GameState, GridSize, OrientationMode, Player, PlayerState, RoundOutcome } from '@/types'
+import { Direction, GameState, GridCell, GridSize, OrientationMode, Player, PlayerState, RoundOutcome } from '@/types'
 
 import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell } from './grid'
 
@@ -17,7 +17,8 @@ export function createInitialGameState(width: number, height: number, mode: Orie
       1: createPlayerState(grid, 1, mode, colors[1]),
       2: createPlayerState(grid, 2, mode, colors[2])
     },
-    outcome: null
+    outcome: null,
+    tick: 0
   }
 }
 
@@ -56,12 +57,27 @@ export function applyTurnIntent(state: GameState, player: Player, direction: Dir
 // other. A crash ends the round immediately — this is a 2-player game, so one crash always means
 // the other player wins outright; there's no "keep simulating with one survivor" state.
 //
+// True on ticks that should trim one cell off the trail's tail, to hold its long-run average
+// growth at `growthRate` cells/tick (1 = never trims, i.e. the original behavior). Compares how
+// many trims *should* have happened by this tick vs. by the last one, rather than a fixed
+// "every Nth tick" cadence, so any rate between 0 and 1 is honored exactly on average — not just
+// simple fractions like 1/2 or 1/3.
+function shouldTrimTrailAt(tick: number, growthRate: number): boolean {
+  if (growthRate >= 1) return false
+  const trimsDueBefore = Math.floor((tick - 1) * (1 - growthRate))
+  const trimsDueNow = Math.floor(tick * (1 - growthRate))
+  return trimsDueNow > trimsDueBefore
+}
+
 // `occupied` defaults to a fresh build from `state.players` (correct for every existing call
 // site/test), but a caller that's already built one from this same state — see useGameState.ts,
 // which also feeds applyCpuTurn from it — can pass it in to skip rebuilding it a second time on
 // the same tick. Trails never change between that build and this call (only pendingDirection
 // does), so reusing it is always safe, not just an optimization that happens to work today.
-export function tickGame(state: GameState, occupied: ReadonlySet<string> = buildOccupiedSet(state.players)): GameState {
+//
+// `trailGrowthRate` defaults to 1 (the original behavior — see TRAIL_GROWTH_RATE) for every
+// existing call site/test that doesn't pass one explicitly.
+export function tickGame(state: GameState, occupied: ReadonlySet<string> = buildOccupiedSet(state.players), trailGrowthRate: number = 1): GameState {
   if (state.phase !== 'playing') return state
 
   const { grid } = state
@@ -84,28 +100,40 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
   const crash1 = headOn || oob1 || occupied.has(cellKey(next1))
   const crash2 = headOn || oob2 || occupied.has(cellKey(next2))
 
+  const tick = state.tick + 1
+
   if (crash1 || crash2) {
     const outcome: RoundOutcome = crash1 && crash2 ? { type: 'draw' } : { type: 'win', winner: crash1 ? 2 : 1 }
     return {
       ...state,
       phase: 'roundOver',
       outcome,
+      tick,
       players: {
         // A crash into a trail (own, opponent's, or head-on) still extends the trail to the
         // collision cell, so the cycle visibly reaches whatever it hit rather than stopping one
         // cell short — an out-of-bounds crash can't do this, since that cell doesn't exist on the
-        // grid to render.
+        // grid to render. Never trimmed here even under a laggy trailGrowthTier — the wall that
+        // was just hit should stay fully visible through the round-over freeze frame, not visibly
+        // recede right as it kills someone.
         1: { ...p1, trail: oob1 ? p1.trail : [...p1.trail, next1], alive: !crash1, pendingDirection: null },
         2: { ...p2, trail: oob2 ? p2.trail : [...p2.trail, next2], alive: !crash2, pendingDirection: null }
       }
     }
   }
 
+  const trimTail = shouldTrimTrailAt(tick, trailGrowthRate)
+  const grow = (trail: GridCell[], next: GridCell) => {
+    const grown = [...trail, next]
+    return trimTail ? grown.slice(1) : grown
+  }
+
   return {
     ...state,
+    tick,
     players: {
-      1: { ...p1, trail: [...p1.trail, next1], direction: dir1, pendingDirection: null },
-      2: { ...p2, trail: [...p2.trail, next2], direction: dir2, pendingDirection: null }
+      1: { ...p1, trail: grow(p1.trail, next1), direction: dir1, pendingDirection: null },
+      2: { ...p2, trail: grow(p2.trail, next2), direction: dir2, pendingDirection: null }
     }
   }
 }

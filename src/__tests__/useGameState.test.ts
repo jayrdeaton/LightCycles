@@ -19,7 +19,7 @@ function installFakeRaf() {
   }
 }
 
-const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false }
+const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailGrowthTier: 'static', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false }
 const CPU_SETTINGS: GameSettings = { ...SETTINGS, gameMode: 'vsCpu', cpuDifficulty: 'hard' }
 const COLORS = { 1: '#3B82F6', 2: '#EF4444' }
 const ORIENTATION = 'faceToFace'
@@ -60,6 +60,22 @@ describe('useGameState', () => {
 
     expect(result.current.state.players[1].trail.length).toBeGreaterThan(1)
     expect(result.current.state.players[2].trail.length).toBeGreaterThan(1)
+  })
+
+  it('keeps a laggy trailGrowthTier shorter than the classic tier over the same run', async () => {
+    const { result: classic } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS, ORIENTATION))
+    const { result: fast } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, trailGrowthTier: 'fast' }, COLORS, ORIENTATION))
+
+    await act(async () => {
+      classic.current.beginPlaying()
+      fast.current.beginPlaying()
+    })
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000)
+    })
+
+    expect(fast.current.state.players[1].trail.length).toBeLessThan(classic.current.state.players[1].trail.length)
   })
 
   it('applies the CPU turn in the same tick it is consumed, when gameMode is vsCpu', async () => {

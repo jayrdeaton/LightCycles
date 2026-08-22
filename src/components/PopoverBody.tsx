@@ -29,11 +29,9 @@ interface Props {
   // Must match the popover box's own borderWidth — a fixed ring thickness would only happen to
   // match whichever box first used it, and look like a mismatched outline on any other consumer.
   caretBorderWidth?: number
-  // The trigger's own width, in px — required whenever a caret is shown with align 'left'/'right'
-  // (unused for 'center', see caretOffset below) so the caret can be pinned to the trigger's actual
-  // center via a fixed offset from the edge the content is flush with, rather than the content
-  // box's own midpoint. Content is usually much wider than its trigger and grows away from it for
-  // 'left'/'right', so those two midpoints only coincide by coincidence, if at all.
+  // The trigger's own width, in px — required whenever a caret is shown, so the caret can be pinned
+  // to the trigger's actual center via a fixed offset rather than the (usually much wider) content
+  // box's own midpoint, which only coincides with the trigger's center by coincidence, if at all.
   triggerSize?: number
 }
 
@@ -50,13 +48,14 @@ export function PopoverBody({ visible, children, align = 'center', caretColor, c
   const ringSize = CARET_SIZE + caretBorderWidth
 
   // The caret is a width:0 box whose rendered footprint is purely its (symmetric) borders, so
-  // pinning its *center* at some offset means placing its own `left`/`right` half a footprint
-  // short of that offset. For 'center', content is symmetric around the same anchor as the trigger
-  // regardless of either one's width, so the content box's own 50% already coincides with the
-  // trigger's center. For 'left'/'right', content is flush with one edge of the (typically much
-  // narrower) trigger and grows away from it — the trigger's center then sits at a fixed distance
-  // (half its own width) from that shared edge, not at the content box's midpoint.
-  const caretOffset = (halfFootprint: number): ViewStyle => (align === 'left' ? { left: triggerSize / 2 - halfFootprint } : align === 'right' ? { right: triggerSize / 2 - halfFootprint } : { left: '50%', marginLeft: -halfFootprint })
+  // pinning its *center* at some offset means placing its own `left`/`right` half a footprint short
+  // of that offset. Every align pins one edge of `content` flush with the matching edge of the
+  // trigger-sized anchor (contentCenter stretches left:0/right:0 to do this too, rather than
+  // centering via a percentage `transform` — those need the child's own auto-resolved width fed
+  // back into the transform, which native has been unreliable about; plain flexbox centering
+  // doesn't), so triggerSize/2 from that shared edge always lands on the trigger's true center,
+  // however much wider the actual popover box grows.
+  const caretOffset = (halfFootprint: number): ViewStyle => (align === 'right' ? { right: triggerSize / 2 - halfFootprint } : { left: triggerSize / 2 - halfFootprint })
 
   return (
     <View style={[styles.content, alignStyle]}>
@@ -93,9 +92,14 @@ const styles = StyleSheet.create({
     top: '100%',
     zIndex: 50
   },
+  // Stretched to the anchor's own (trigger) width, with alignItems centering the actual (usually
+  // much wider) popover box inside via plain flexbox — not `left:'50%'` plus a percentage
+  // `transform`, which depends on native resolving the box's own auto width before applying the
+  // transform and has proven unreliable there, visibly shifting the box off-center.
   contentCenter: {
-    left: '50%',
-    transform: [{ translateX: '-50%' }]
+    alignItems: 'center',
+    left: 0,
+    right: 0
   },
   contentLeft: {
     left: 0

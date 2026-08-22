@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native'
 import { Icon } from 'react-native-paper'
 
 import { PopoverBody } from '@/components/PopoverBody'
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { PopoverHost } from '@/hooks/usePopoverHost'
 
 const SIZE = 48
@@ -11,6 +12,10 @@ const SWATCH_SIZE = 28
 const SWATCHES_PADDING = 8
 const SWATCHES_GAP = 6
 const SWATCHES_BORDER_WIDTH = 2
+// Landscape (side-by-side) trades the portrait grid's 4 columns for 5 to cut a row off its height —
+// vertical room is what's actually scarce there, and 20 swatches divides evenly either way.
+const SWATCHES_COLUMNS_PORTRAIT = 4
+const SWATCHES_COLUMNS_LANDSCAPE = 5
 
 interface Props {
   id: string
@@ -43,6 +48,8 @@ interface Props {
 // panel at the same time. This renders inline instead, scoped to its own panel.
 export function InlineColorPicker({ id, host, value, onChange, swatches = defaultColors, takenValue, allowSwapTaken, dark, align, icon = 'palette' }: Props) {
   const menuBg = dark ? '#000000' : '#FFFFFF'
+  const columns = useDeviceOrientation() === 'sideBySide' ? SWATCHES_COLUMNS_LANDSCAPE : SWATCHES_COLUMNS_PORTRAIT
+  const swatchesWidth = SWATCHES_BORDER_WIDTH * 2 + SWATCHES_PADDING * 2 + SWATCH_SIZE * columns + SWATCHES_GAP * (columns - 1)
 
   const open = host.openId === id
 
@@ -56,7 +63,7 @@ export function InlineColorPicker({ id, host, value, onChange, swatches = defaul
         {/* Border matches this trigger's own current color (not a neutral gray) — two triggers can
         sit close together, so the popover needs a clear visual tie back to which one opened it,
         not just its screen position. */}
-        <View style={[styles.swatches, { backgroundColor: menuBg, borderColor: value }]}>
+        <View style={[styles.swatches, { backgroundColor: menuBg, borderColor: value, width: swatchesWidth }]}>
           {swatches.map((swatch) => {
             const selected = swatch.value.toLowerCase() === value.toLowerCase()
             const taken = !selected && !!takenValue && swatch.value.toLowerCase() === takenValue.toLowerCase()
@@ -117,12 +124,11 @@ const styles = StyleSheet.create({
     shadowColor: '#000000',
     shadowOffset: { height: 2, width: 0 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    // Exact width for 4 columns: border-box sizing means `width` has to include the border too
-    // (2*SWATCHES_BORDER_WIDTH), not just padding+content — omitting it left exactly enough room
-    // short that the 4th column silently wrapped to a new row every time. Anything wider than this
-    // exact sum just shows as dead space on the right edge of each row instead.
-    width: SWATCHES_BORDER_WIDTH * 2 + SWATCHES_PADDING * 2 + SWATCH_SIZE * 4 + SWATCHES_GAP * 3
+    shadowRadius: 8
+    // width is set inline above — border-box sizing means it has to include the border too
+    // (2*SWATCHES_BORDER_WIDTH), not just padding+content, or exactly enough room goes missing that
+    // the last column silently wraps to a new row. Anything wider than the exact sum just shows as
+    // dead space on the right edge of each row instead.
   },
   trigger: {
     alignItems: 'center',

@@ -40,12 +40,11 @@ const TRAIL_FADE_DURATION_MS = 280
 // off the ends, so that full height sits dead center on the shared horizontal seam. An offset of
 // exactly that padded height makes Light's trail edge and Cycles' trail edge touch at a single
 // point (a true kiss, zero gap); px above it is real clearance, px below it is deliberate overlap.
-// -3 here means the two loops' edges actually overlap by 3px, which combined with HeroTitleTrails'
-// own 3px stroke width reads as the two strokes briefly crossing/grazing each other at that point
-// in the loop — closer than a true near-miss, on purpose, since sharp (unrounded) corners can't
-// carve out extra clearance the way the old rounded corners did (see the wordPath comment in
-// HeroTitleTrails.tsx), and a true kiss (0) still read as slightly too far apart.
-const CYCLES_VERTICAL_OFFSET = 44 + TRAIL_TEXT_MARGIN_TOP + TRAIL_TEXT_MARGIN_BOTTOM - 3
+// +1 here leaves the two loops' edges a hairline apart at that point, rather than overlapping —
+// combined with HeroTitleTrails' own 3px stroke width this reads as the two strokes passing by
+// each other without ever touching: a true near-miss, not the graze a negative value (or a literal
+// 0 kiss) produces.
+const CYCLES_VERTICAL_OFFSET = 44 + TRAIL_TEXT_MARGIN_TOP + TRAIL_TEXT_MARGIN_BOTTOM + 1
 
 function AnimatedLetter({ char, index, color, reducedMotion }: { char: string; index: number; color: string; reducedMotion: boolean }) {
   const progress = useSharedValue(reducedMotion ? 1 : 0)
