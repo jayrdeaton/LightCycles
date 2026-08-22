@@ -6,7 +6,7 @@ import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { applyControlInversion, resolveTurnIntent } from '@/utils/turnIntent'
+import { applyControlInversion, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -17,8 +17,8 @@ export interface TouchInputLayerProps {
   humanPlayers: Player[]
   enabled: boolean
   onTurn: (player: Player, direction: Direction) => void
-  // Fires the player's held powerup — see the per-player Pan's own onEnd below for how a tap (a
-  // touch that never crossed the swipe threshold) is told apart from a drag-to-steer.
+  // Fires the player's held powerup — see makePlayerGesture's own Gesture.Tap below, a dedicated
+  // recognizer for "was this a tap" rather than one inferred from the Pan's own drag state.
   onActivate: (player: Player) => void
   // Whether Hack currently has this player's steering inverted — applied here, at the single
   // JS-thread chokepoint every recognized turn already flows through (handleTurn), not inside the
@@ -90,8 +90,8 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
     // changing from the last one recognized in this touch, so holding a straight line doesn't
     // repeat the same turn every MIN_SWIPE_DISTANCE px — applyTurnIntent's own same-direction no-op
     // (see gameEngine.ts) would make repeats harmless for the game state, but not for the feedback.
-    const makePlayerPan = (player: Player, base: SharedValue<{ x: number; y: number }>, lastDirection: SharedValue<Direction | null>, hitSlop: { top?: number; bottom?: number; left?: number; right?: number }) =>
-      Gesture.Pan()
+    const makePlayerGesture = (player: Player, base: SharedValue<{ x: number; y: number }>, lastDirection: SharedValue<Direction | null>, hitSlop: { top?: number; bottom?: number; left?: number; right?: number }) => {
+      const pan = Gesture.Pan()
         .maxPointers(1)
         .minDistance(0)
         .hitSlop(hitSlop)
@@ -114,15 +114,27 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
             runOnJS(handleTurn)(player, direction)
           }
         })
-        // A touch that never crosses MIN_SWIPE_DISTANCE never sets lastDirection above (see
-        // resolveTurnIntent) — today, that's a complete no-op; here, it's the free gesture space a
-        // tap-to-activate uses. Firing on release (not on start) is what tells a genuine tap apart
-        // from the very first moment of a drag that simply hasn't crossed the threshold yet.
-        .onEnd(() => {
-          if (lastDirection.value === null) runOnJS(handleActivate)(player)
+
+      // A dedicated, purpose-built recognizer for "was this a tap" — TAP_MAX_DISTANCE, kept below
+      // MIN_SWIPE_DISTANCE, is what RNGH itself uses to decide the gesture failed once a finger
+      // drifts too far, rather than this file re-deriving "no swipe direction was ever recognized"
+      // from the Pan's own state (the previous approach — occasionally left a genuine but slightly
+      // wobbly tap unrecognized, since human touches are rarely perfectly stationary). Runs
+      // simultaneously with the Pan (see the Gesture.Simultaneous below), sharing its hitSlop so
+      // taps and drags are zoned identically; `success` is false if the gesture failed (drifted too
+      // far, or was cancelled), so only a real, released tap fires activation.
+      const tap = Gesture.Tap()
+        .maxDistance(TAP_MAX_DISTANCE)
+        .hitSlop(hitSlop)
+        .enabled(enabled)
+        .onEnd((_event, success) => {
+          if (success) runOnJS(handleActivate)(player)
         })
 
-    if (solo) return makePlayerPan(humanPlayers[0], baseFor(humanPlayers[0]), lastDirectionFor(humanPlayers[0]), {})
+      return Gesture.Simultaneous(pan, tap)
+    }
+
+    if (solo) return makePlayerGesture(humanPlayers[0], baseFor(humanPlayers[0]), lastDirectionFor(humanPlayers[0]), {})
 
     // Face-to-face: top/bottom split (player 1 = near/bottom zone, since player 1 is assumed to be
     // the device's owner and the near zone faces them; player 2 = far/top zone).
@@ -130,10 +142,10 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
     // gets the right zone — matches GameBoard.tsx's identical wallPath split.
     const p1HitSlop = p1OnRight ? { left: -(size.width / 2) } : { right: -(size.width / 2) }
     const p2HitSlop = p1OnRight ? { right: -(size.width / 2) } : { left: -(size.width / 2) }
-    const p1Pan = orientationMode === 'faceToFace' ? makePlayerPan(1, p1Base, p1LastDirection, { top: -(size.height / 2) }) : makePlayerPan(1, p1Base, p1LastDirection, p1HitSlop)
-    const p2Pan = orientationMode === 'faceToFace' ? makePlayerPan(2, p2Base, p2LastDirection, { bottom: -(size.height / 2) }) : makePlayerPan(2, p2Base, p2LastDirection, p2HitSlop)
+    const p1Gesture = orientationMode === 'faceToFace' ? makePlayerGesture(1, p1Base, p1LastDirection, { top: -(size.height / 2) }) : makePlayerGesture(1, p1Base, p1LastDirection, p1HitSlop)
+    const p2Gesture = orientationMode === 'faceToFace' ? makePlayerGesture(2, p2Base, p2LastDirection, { bottom: -(size.height / 2) }) : makePlayerGesture(2, p2Base, p2LastDirection, p2HitSlop)
 
-    return Gesture.Simultaneous(p1Pan, p2Pan)
+    return Gesture.Simultaneous(p1Gesture, p2Gesture)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- p1Base/p2Base/p1LastDirection/p2LastDirection are stable SharedValue refs (like useRef), not reactive state
   }, [size, orientationMode, p1OnRight, humanPlayers, solo, enabled, handleTurn, handleActivate])
 

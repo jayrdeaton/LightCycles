@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { applyControlInversion, resolveTurnIntent } from '@/utils/turnIntent'
+import { applyControlInversion, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -33,6 +33,11 @@ const KEY_SCHEME_KEYS: Record<KeyScheme, { up: string; down: string; left: strin
 
 interface TrackedPointer {
   player: Player
+  // Original pointerdown position — never reset, unlike baseX/baseY below — so tap-to-activate
+  // (see handlePointerUp) measures total drift from where the touch actually started, decoupled
+  // from swipe-segment bookkeeping entirely, mirroring the native file's dedicated Gesture.Tap.
+  downX: number
+  downY: number
   // Origin of the *current* segment (reset after each recognized swipe — see handlePointerMove)
   // so a player can chain several turns within one continuous pointer-down, mirroring the native
   // file's onUpdate-driven baseline reset.
@@ -137,7 +142,7 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       for (const existing of pointers.values()) {
         if (existing.player === player) return
       }
-      pointers.set(e.pointerId, { player, baseX: e.clientX, baseY: e.clientY, lastDirection: null })
+      pointers.set(e.pointerId, { player, downX: e.clientX, downY: e.clientY, baseX: e.clientX, baseY: e.clientY, lastDirection: null })
     }
 
     // Resolves a turn continuously as the pointer moves (mirrors the native file's onUpdate)
@@ -160,12 +165,14 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       }
     }
 
-    // A pointer that never resolved a direction (see handlePointerMove) never moved past
-    // MIN_SWIPE_DISTANCE from where it went down — today, that's a complete no-op; here, it's the
-    // free gesture space a tap-to-activate uses. Mirrors the native file's identical onEnd check.
+    // Tap-to-activate: measured against total drift from the ORIGINAL pointerdown position
+    // (downX/downY), not the swipe-segment bookkeeping in baseX/baseY/lastDirection above — a
+    // dedicated, decoupled check (TAP_MAX_DISTANCE, kept below MIN_SWIPE_DISTANCE) rather than
+    // inferring "was this a tap" from "no swipe was ever recognized," which occasionally left a
+    // genuine but slightly wobbly tap unrecognized. Mirrors the native file's own Gesture.Tap.
     const handlePointerUp = (e: PointerEvent) => {
       const tracked = pointers.get(e.pointerId)
-      if (tracked && tracked.lastDirection === null) {
+      if (tracked && Math.hypot(e.clientX - tracked.downX, e.clientY - tracked.downY) <= TAP_MAX_DISTANCE) {
         onActivate(tracked.player)
         playActivate()
         selection()

@@ -125,11 +125,10 @@ export const CPU_FLOOD_FILL_CAP = 900
 // ─── Powerups ───────────────────────────────────────────────────────────────
 // Tick-based (not ms) throughout, matching TRAIL_GROWTH_RATE's own precedent — see gameEngine.ts's
 // tickGame, which already treats ticks (not wall-clock time) as this game's true unit of time.
-// Real-world cadence/duration then varies slightly with speedTier/gridSizeTier, same as every
-// other tick-denominated constant here.
-export const POWERUP_SPAWN_INTERVAL_TICKS = 90 // ~5.6s at 'normal' speed tier (63ms/tick)
-export const POWERUP_MAX_CONCURRENT = 2
-
+// Real-world cadence then varies slightly with speedTier/gridSizeTier, same as every other
+// tick-denominated constant here. Exactly one pickup is ever on the board at a time (see
+// gameEngine.ts's maybeSpawnPickup) — a replacement appears the very next tick after one's
+// collected, no interval/cooldown to wait out.
 export const POWERUP_ALL_TYPES: PowerupType[] = ['overdrive', 'stasis', 'shield', 'prune', 'hack', 'overclock']
 
 // Ticks a timed activation remains in force — see SpeedEffect/ControlEffect/ShieldEffect's own
@@ -158,6 +157,19 @@ export const POWERUP_PRUNE_AMOUNT_CELLS = 15
 export function powerupPickupRadiusPx(cellPx: number): number {
   return Math.max(cellPx * 1.8, 9)
 }
+
+// A player collects a pickup by driving through any cell within this Chebyshev radius of its own
+// (1 = the pickup's own cell plus its full ring of 8 neighbors) — matching the glyph's own
+// rendered footprint above, which visually spans well past a single cell, rather than requiring
+// the exact cell dead-center (see gameEngine.ts's tickGame).
+export const POWERUP_COLLECT_RADIUS_CELLS = 1
+
+// On-board glyph animation timing — a quick grow/fade the instant a pickup spawns (so it doesn't
+// just pop into existence), then an endless gentle pulse for as long as it sits uncollected (see
+// GameBoard.tsx's PowerupGlyph). Purely cosmetic — never affects when it's actually collectible.
+export const POWERUP_SPAWN_FADE_MS = 260
+export const POWERUP_PULSE_DURATION_MS = 900
+export const POWERUP_PULSE_SCALE = 0.16
 
 // On-board head-effect-tell ring colors, keyed by what's actually driving the effect (not just its
 // axis) so Overdrive/Stasis/Overclock read as visually distinct despite Overdrive and Overclock

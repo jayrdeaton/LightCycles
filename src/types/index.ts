@@ -124,7 +124,8 @@ export interface GameState {
   // rather than trail length, since a laggy trailGrowthTier can leave trail length unchanged on a
   // tick that both grows and trims it (see gameEngine.ts's tickGame).
   tick: number
-  // Board-wide, not per-player — bounded by POWERUP_MAX_CONCURRENT, so a linear scan is fine.
+  // Board-wide, not per-player — at most one entry at a time (see gameEngine.ts's
+  // maybeSpawnPickup), so a linear scan is fine.
   pickups: PowerupPickup[]
 }
 

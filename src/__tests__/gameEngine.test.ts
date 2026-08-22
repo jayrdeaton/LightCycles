@@ -1,4 +1,4 @@
-import { GRID_CELL_PX, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, POWERUP_SPAWN_INTERVAL_TICKS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { GRID_CELL_PX, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { GameState, GridCell, PlayerState } from '@/types'
 import { applyActivation, applyTurnIntent, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
@@ -393,24 +393,42 @@ describe('tickGame', () => {
       expect(next.pickups).toHaveLength(1)
     })
 
-    it('does not collect a second pickup while already holding one (single-slot inventory)', () => {
+    it('replaces the currently held powerup when driving over a new one', () => {
       const state = stateWithPickup({ x: 3, y: 5 }, { players: { 1: ps({ trail: [{ x: 2, y: 5 }], direction: 'right', color: '#3B82F6', heldPowerup: 'shield' }), 2: ps({ trail: [{ x: 0, y: 0 }], direction: 'down', color: '#EF4444' }) } })
       const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES)
-      expect(next.players[1].heldPowerup).toBe('shield')
+      expect(next.players[1].heldPowerup).toBe('overdrive')
+      // The board dropping to 0 pickups immediately triggers the "always at least one" spawn (see
+      // its own describe block below) — asserting the original is gone, not that the board is
+      // empty, since a replacement appearing right away is expected, not a bug.
+      expect(next.pickups.some((pu) => pu.id === 'pu-test')).toBe(false)
+    })
+
+    it('collects a pickup by driving through any cell within its collection radius, not just its exact cell', () => {
+      // Player 1 steps to (3,5); the pickup sits one cell further out at (4,5) — outside an exact
+      // match, but within POWERUP_COLLECT_RADIUS_CELLS of (3,5).
+      const state = stateWithPickup({ x: 4, y: 5 })
+      const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES)
+      expect(next.players[1].heldPowerup).toBe('overdrive')
+      expect(next.pickups.some((pu) => pu.id === 'pu-test')).toBe(false)
+    })
+
+    it('does not collect a pickup outside its collection radius', () => {
+      const state = stateWithPickup({ x: 5, y: 5 })
+      const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES)
+      expect(next.players[1].heldPowerup).toBeNull()
       expect(next.pickups).toHaveLength(1)
     })
 
     it('never spawns pickups when powerups are disabled', () => {
-      const state = makeState({ tick: POWERUP_SPAWN_INTERVAL_TICKS - 1, pickups: [] })
+      const state = makeState({ tick: 10, pickups: [] })
       const next = tickGame(state, undefined, 1, [], () => 0)
       expect(next.pickups).toEqual([])
     })
 
-    // Like a single apple in Snake — the board should never sit empty, and a replacement should
-    // never have to wait for the next scheduled interval check.
-    describe('always keeps at least one pickup on the board', () => {
-      it("spawns the round's very first pickup on tick 1, not waiting for the interval", () => {
-        // tick 1 is deliberately NOT a multiple of POWERUP_SPAWN_INTERVAL_TICKS.
+    // Like a single apple in Snake — exactly one pickup is ever on the board, and a replacement
+    // never has to wait out an interval/cooldown once it's gone.
+    describe('always keeps exactly one pickup on the board', () => {
+      it("spawns the round's very first pickup on tick 1", () => {
         const state = makeState({ tick: 0, pickups: [] })
         const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
         expect(next.tick).toBe(1)
@@ -418,33 +436,20 @@ describe('tickGame', () => {
         expect(POWERUP_ALL_TYPES).toContain(next.pickups[0].type)
       })
 
-      it('replaces a collected pickup immediately, on the very next tick, off-interval', () => {
-        // tick 1 -> 2 is nowhere near a POWERUP_SPAWN_INTERVAL_TICKS boundary — the old
-        // interval-only rule would have left the board empty here.
+      it('replaces a collected pickup immediately, on the very next tick', () => {
         const state = stateWithPickup({ x: 3, y: 5 }, { tick: 1 })
         const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
         expect(next.players[1].heldPowerup).toBe('overdrive')
         expect(next.pickups).toHaveLength(1)
       })
 
-      it('does not top up a second, concurrent pickup off-interval once at least one is already present', () => {
+      it('never spawns a second pickup while one is already on the board', () => {
         // (5,5) is off both players' paths this tick (player 1 steps to (3,5), player 2 to (0,1)),
-        // so the existing pickup is NOT collected — the "at least one" floor is already satisfied.
+        // so the existing pickup is NOT collected — a second should still never appear alongside it.
         const state = stateWithPickup({ x: 5, y: 5 }, { tick: 1 })
         const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
-        // Topping up to the 2-concurrent cap should still wait for the scheduled interval, not
-        // happen on every off-interval tick too.
         expect(next.pickups).toHaveLength(1)
         expect(next.pickups[0].cell).toEqual({ x: 5, y: 5 })
-      })
-
-      it('does top up to the concurrent cap on a scheduled interval tick, once already holding one', () => {
-        // (5,5) is off both players' paths this tick, so the existing pickup survives uncollected
-        // into the post-move spawn check, which lands exactly on an interval boundary.
-        const state = stateWithPickup({ x: 5, y: 5 }, { tick: POWERUP_SPAWN_INTERVAL_TICKS - 1 })
-        const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
-        expect(next.tick).toBe(POWERUP_SPAWN_INTERVAL_TICKS)
-        expect(next.pickups).toHaveLength(2)
       })
     })
   })

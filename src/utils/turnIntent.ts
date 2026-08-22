@@ -4,6 +4,15 @@ import { Direction, OrientationMode, Player } from '@/types'
 // deliberate flick-to-turn.
 export const MIN_SWIPE_DISTANCE = 24
 
+// How far a finger/pointer may drift and still count as a tap-to-activate, rather than the start
+// of a drag — deliberately below MIN_SWIPE_DISTANCE (not equal to it) so the two never overlap: a
+// touch that drifts past this is unambiguously either still within tap tolerance or already a
+// recognized swipe, never both, and never neither. See TouchInputLayer.tsx's own Gesture.Tap
+// (native) and TouchInputLayer.web.tsx's pointer-distance tracking (web), which both use this
+// directly rather than re-deriving "was this a tap" from swipe-direction bookkeeping — that
+// approach occasionally left a genuine, slightly-wobbly tap unrecognized.
+export const TAP_MAX_DISTANCE = 18
+
 // Compares the magnitude of each axis of a translation vector to pick its dominant axis, then the
 // sign of that axis for direction. Returns null for a drag too short to count as an intentional
 // swipe. The vector doesn't have to span a whole gesture end-to-end — TouchInputLayer feeds this

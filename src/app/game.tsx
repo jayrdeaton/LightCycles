@@ -148,9 +148,9 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
 
   return (
     <>
-      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} trailGrowthRate={TRAIL_GROWTH_RATE[settings.trailGrowthTier]} />
+      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} pickupColor={themeColors.tertiary} trailGrowthRate={TRAIL_GROWTH_RATE[settings.trailGrowthTier]} />
       <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} keyScheme={settings.keyScheme} />
-      {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} orientationMode={orientationMode} p1OnRight={p1OnRight} />}
+      {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} />}
 
       {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown
       timers are scheduled once on mount with no pause hook of their own, so unmounting is what

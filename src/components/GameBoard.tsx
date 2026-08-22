@@ -1,10 +1,10 @@
 import { getContrastColor } from '@rific/auto-paper'
 import { Canvas, Circle, Line, Path, Skia, vec } from '@shopify/react-native-skia'
-import { Fragment, useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Easing, useDerivedValue, useSharedValue, withTiming } from 'react-native-reanimated'
+import { Easing, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { POWERUP_EFFECT_COLORS, powerupPickupRadiusPx } from '@/constants/game'
+import { POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, PowerupPickup } from '@/types'
 import { cellToPixel } from '@/utils/grid'
 
@@ -23,6 +23,9 @@ export interface GameBoardProps {
   // that both grows and trims the trail.
   tick: number
   pickups: PowerupPickup[]
+  // The app theme's tertiary color — pickups render in this, distinct from either player's own
+  // primary/secondary trail color, so a glyph never gets mistaken for either player's own head.
+  pickupColor: string
   // The resolved TRAIL_GROWTH_RATE number for the active trailGrowthTier (see constants/game.ts) —
   // lets PlayerTrail interpolate the tail's position continuously between trims instead of holding
   // still and then snapping a whole cell forward. Passed as the raw rate, not the tier, so this
@@ -52,28 +55,43 @@ const WALL_STROKE_WIDTH = 1.5
 // Every live pickup renders identically, regardless of its actual (already-decided, see
 // gameEngine.ts's maybeSpawnPickup) type — Mario-Kart mystery-box style. The type is only ever
 // revealed once collected, in the holder's own HUD badge (see PowerupHud.tsx), never on the board.
-const POWERUP_MYSTERY_FILL = '#CFD8DC'
-const POWERUP_MYSTERY_STROKE = '#FFFFFF'
+function PowerupGlyph({ pickup, cellPx, color }: { pickup: PowerupPickup; cellPx: number; color: string }) {
+  const baseRadius = powerupPickupRadiusPx(cellPx)
+  const center = cellCenter(pickup.cell, cellPx)
 
-function pickupGlyphPath(center: { x: number; y: number }, radius: number) {
-  const path = Skia.Path.Make()
-  path.addCircle(center.x, center.y, radius)
-  return path
-}
+  // `intro` runs 0 -> 1 once, the instant this glyph mounts (a fresh pickup — see this component's
+  // own key below, which remounts on every genuine spawn) rather than popping straight into
+  // existence. `pulse` only starts once intro finishes, then loops forever (see withRepeat's
+  // reverse arg for the back-and-forth) for as long as the pickup sits uncollected, as a quiet
+  // "I'm alive, come get me" cue. Both are purely cosmetic — never affect POWERUP_COLLECT_RADIUS_CELLS.
+  const intro = useSharedValue(0)
+  const pulse = useSharedValue(0)
+  useEffect(() => {
+    intro.value = withTiming(1, { duration: POWERUP_SPAWN_FADE_MS, easing: Easing.out(Easing.quad) })
+    pulse.value = withDelay(POWERUP_SPAWN_FADE_MS, withRepeat(withTiming(1, { duration: POWERUP_PULSE_DURATION_MS, easing: Easing.inOut(Easing.ease) }), -1, true))
+    // Intentionally runs once per mount (a fresh pickup, keyed by id in Powerups below) — not tied
+    // to any prop that changes while the same pickup is still sitting there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-function Powerups({ pickups, cellPx }: { pickups: PowerupPickup[]; cellPx: number }) {
-  const radius = powerupPickupRadiusPx(cellPx)
+  const radius = useDerivedValue(() => baseRadius * (0.4 + 0.6 * intro.value) * (1 + pulse.value * POWERUP_PULSE_SCALE))
+  const strokeOpacity = useDerivedValue(() => intro.value)
+  const fillOpacity = useDerivedValue(() => intro.value * 0.35)
+
   return (
     <>
-      {pickups.map((pu) => {
-        const path = pickupGlyphPath(cellCenter(pu.cell, cellPx), radius)
-        return (
-          <Fragment key={pu.id}>
-            <Path path={path} color={POWERUP_MYSTERY_FILL} style='fill' opacity={0.35} />
-            <Path path={path} color={POWERUP_MYSTERY_STROKE} style='stroke' strokeWidth={1.5} />
-          </Fragment>
-        )
-      })}
+      <Circle cx={center.x} cy={center.y} r={radius} color={color} opacity={fillOpacity} />
+      <Circle cx={center.x} cy={center.y} r={radius} style='stroke' strokeWidth={1.5} color={color} opacity={strokeOpacity} />
+    </>
+  )
+}
+
+function Powerups({ pickups, cellPx, color }: { pickups: PowerupPickup[]; cellPx: number; color: string }) {
+  return (
+    <>
+      {pickups.map((pu) => (
+        <PowerupGlyph key={pu.id} pickup={pu} cellPx={cellPx} color={color} />
+      ))}
     </>
   )
 }
@@ -324,12 +342,12 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   )
 }
 
-export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, trailGrowthRate }: GameBoardProps) {
+export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, pickupColor, trailGrowthRate }: GameBoardProps) {
   return (
     <View style={styles.container}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Walls grid={grid} cellPx={cellPx} orientationMode={orientationMode} p1OnRight={p1OnRight} players={players} phase={phase} />
-        <Powerups pickups={pickups} cellPx={cellPx} />
+        <Powerups pickups={pickups} cellPx={cellPx} color={pickupColor} />
         <PlayerTrail player={players[1]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailGrowthRate={trailGrowthRate} />
         <PlayerTrail player={players[2]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailGrowthRate={trailGrowthRate} />
       </Canvas>

@@ -1,4 +1,4 @@
-import { POWERUP_EFFECT_DURATION_TICKS, POWERUP_MAX_CONCURRENT, POWERUP_PRUNE_AMOUNT_CELLS, POWERUP_SPAWN_INTERVAL_TICKS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { ControlEffect, Direction, GameState, GridCell, GridSize, OrientationMode, Player, PlayerEffects, PlayerState, PowerupPickup, PowerupType, RoundOutcome, ShieldEffect, SpeedEffect } from '@/types'
 
 import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell } from './grid'
@@ -94,10 +94,6 @@ function locateOccupyingTrail(cell: GridCell, trail1: GridCell[], trail2: GridCe
   return null
 }
 
-function isPowerupSpawnDueAt(tick: number): boolean {
-  return tick % POWERUP_SPAWN_INTERVAL_TICKS === 0
-}
-
 // Deterministic id — a spawn tick + cell pair is already unique for a single spawn event, so no
 // uuid/Date.now() is needed (this file stays pure/I-O-free).
 function pickupId(tick: number, cell: GridCell): string {
@@ -118,19 +114,16 @@ function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, pick
   return candidates[Math.floor(random() * candidates.length)]
 }
 
-// Never leaves the board empty — like a single apple in Snake, the instant the last pickup is
-// gone (collected, or none has spawned yet this round) a replacement appears immediately, on the
-// very next tick, rather than waiting for the next POWERUP_SPAWN_INTERVAL_TICKS check. Above that
-// floor of 1, a second concurrent pickup (up to POWERUP_MAX_CONCURRENT) still only tops up on the
-// normal interval cadence — the guarantee is "never zero," not "always at the cap." `occupied`
-// here should already reflect every cell committed this tick (see tickGame's own `working` set) so
-// a pickup never spawns under a cycle that just moved there. `enabledPowerups` is the per-round
-// selection from GameSettings — an empty list (the "powerups off" case, see GameSettings' own
-// comment) means this never spawns anything at all, not even the "always one" floor.
+// Exactly one pickup on the board at a time, like a single apple in Snake — the instant it's
+// collected (or none has spawned yet this round) a replacement appears immediately, on the very
+// next tick, with no interval/cooldown to wait out. `occupied` here should already reflect every
+// cell committed this tick (see tickGame's own `working` set) so a pickup never spawns under a
+// cycle that just moved there. `enabledPowerups` is the per-round selection from GameSettings — an
+// empty list (the "powerups off" case, see GameSettings' own comment) means this never spawns
+// anything at all.
 function maybeSpawnPickup(grid: GridSize, tick: number, pickups: PowerupPickup[], occupied: ReadonlySet<string>, enabledPowerups: PowerupType[], random: () => number): PowerupPickup[] {
   if (enabledPowerups.length === 0) return pickups
-  if (pickups.length >= POWERUP_MAX_CONCURRENT) return pickups
-  if (pickups.length > 0 && !isPowerupSpawnDueAt(tick)) return pickups
+  if (pickups.length > 0) return pickups
   const cell = pickRandomEmptyCell(grid, occupied, pickups, random)
   if (!cell) return pickups
   const type = enabledPowerups[Math.floor(random() * enabledPowerups.length)]
@@ -314,21 +307,25 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
     }
 
     // Pickup collection — per sub-step, so a boosted player can't glide past a pickup on an
-    // intermediate cell without collecting it. Single-slot inventory: a no-op walk-over if already
-    // holding something, and the pickup stays on the board. Two players landing on the exact same
-    // pickup cell in the same sub-step is impossible without it also being a head-on collision
-    // (already handled above, which ends the round before this runs) — so no separate tie-break is
-    // needed here.
+    // intermediate cell without collecting it. Any cell within POWERUP_COLLECT_RADIUS_CELLS of the
+    // pickup's own counts, not just its exact cell — matching the glyph's own rendered footprint,
+    // which visually spans past a single cell (see powerupPickupRadiusPx). Collecting always
+    // REPLACES whatever's currently held, rather than no-op'ing while already holding something —
+    // there's only ever one held slot, so grabbing a new pickup is a deliberate swap. Sequential
+    // (player 1 checked first) rather than needing an explicit tie-break: two players within radius
+    // of the SAME pickup in the same sub-step is now possible without a head-on (unlike the old
+    // exact-cell match), but whichever is checked first removes it from `pickups` before the
+    // other's own check runs, so at most one of them ever collects it.
     if (enabledPowerups.length > 0) {
-      if (stepping1 && !heldPowerup1) {
-        const found = pickups.find((pu) => pu.cell.x === next1!.x && pu.cell.y === next1!.y)
+      if (stepping1) {
+        const found = pickups.find((pu) => Math.abs(pu.cell.x - next1!.x) <= POWERUP_COLLECT_RADIUS_CELLS && Math.abs(pu.cell.y - next1!.y) <= POWERUP_COLLECT_RADIUS_CELLS)
         if (found) {
           heldPowerup1 = found.type
           pickups = pickups.filter((pu) => pu.id !== found.id)
         }
       }
-      if (stepping2 && !heldPowerup2) {
-        const found = pickups.find((pu) => pu.cell.x === next2!.x && pu.cell.y === next2!.y)
+      if (stepping2) {
+        const found = pickups.find((pu) => Math.abs(pu.cell.x - next2!.x) <= POWERUP_COLLECT_RADIUS_CELLS && Math.abs(pu.cell.y - next2!.y) <= POWERUP_COLLECT_RADIUS_CELLS)
         if (found) {
           heldPowerup2 = found.type
           pickups = pickups.filter((pu) => pu.id !== found.id)
