@@ -61,6 +61,21 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
           <Switch value={settings.speedRampEnabled} onValueChange={(value) => setSettings({ speedRampEnabled: value })} />
         </View>
 
+        <View style={styles.row}>
+          <View style={styles.rowStart}>
+            <SettingIcon source='lock-outline' color={colors.secondary} containerColor={colors.secondaryContainer} />
+            <View style={styles.flexShrink}>
+              <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                Lock Orientation
+              </Text>
+              <Text variant='bodySmall' style={{ color: colors.onSurfaceVariant }}>
+                Pin the current layout instead of following the phone as it turns
+              </Text>
+            </View>
+          </View>
+          <Switch value={settings.lockOrientation} onValueChange={(value) => setSettings({ lockOrientation: value })} />
+        </View>
+
         <View style={styles.section}>
           <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
             APPEARANCE

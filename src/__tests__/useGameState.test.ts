@@ -19,9 +19,10 @@ function installFakeRaf() {
   }
 }
 
-const SETTINGS: GameSettings = { orientationMode: 'faceToFace', speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', keyScheme: { 1: 'wasd', 2: 'arrows' } }
+const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false }
 const CPU_SETTINGS: GameSettings = { ...SETTINGS, gameMode: 'vsCpu', cpuDifficulty: 'hard' }
 const COLORS = { 1: '#3B82F6', 2: '#EF4444' }
+const ORIENTATION = 'faceToFace'
 
 describe('useGameState', () => {
   beforeEach(() => {
@@ -34,7 +35,7 @@ describe('useGameState', () => {
   })
 
   it('starts in onboarding and does not tick before beginPlaying is called', async () => {
-    const { result } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS))
+    const { result } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS, ORIENTATION))
     expect(result.current.state.phase).toBe('onboarding')
 
     await act(async () => {
@@ -46,7 +47,7 @@ describe('useGameState', () => {
   })
 
   it('advances both trails once playing', async () => {
-    const { result } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS))
+    const { result } = await renderHook(() => useGameState(200, 200, SETTINGS, COLORS, ORIENTATION))
 
     await act(async () => {
       result.current.beginPlaying()
@@ -62,7 +63,7 @@ describe('useGameState', () => {
   })
 
   it('applies the CPU turn in the same tick it is consumed, when gameMode is vsCpu', async () => {
-    const { result } = await renderHook(() => useGameState(200, 200, CPU_SETTINGS, COLORS))
+    const { result } = await renderHook(() => useGameState(200, 200, CPU_SETTINGS, COLORS, ORIENTATION))
 
     await act(async () => {
       result.current.beginPlaying()
@@ -80,8 +81,8 @@ describe('useGameState', () => {
   })
 
   it('exposes a larger cellPx, and a proportionally larger tickIntervalMs, for a larger grid-size tier', async () => {
-    const { result: small } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, gridSizeTier: 'small' }, COLORS))
-    const { result: large } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, gridSizeTier: 'large' }, COLORS))
+    const { result: small } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, gridSizeTier: 'small' }, COLORS, ORIENTATION))
+    const { result: large } = await renderHook(() => useGameState(200, 200, { ...SETTINGS, gridSizeTier: 'large' }, COLORS, ORIENTATION))
 
     expect(large.current.cellPx).toBeGreaterThan(small.current.cellPx)
     // On-screen px/sec pace stays constant across tiers: ms/tick scales with cellPx (see
@@ -93,7 +94,7 @@ describe('useGameState', () => {
   it('stops ticking once the round ends', async () => {
     // A 1x1-cell board (well under any grid-size tier's cellPx) forces an edge crash on the very
     // first tick.
-    const { result } = await renderHook(() => useGameState(1, 1, SETTINGS, COLORS))
+    const { result } = await renderHook(() => useGameState(1, 1, SETTINGS, COLORS, ORIENTATION))
 
     await act(async () => {
       result.current.beginPlaying()

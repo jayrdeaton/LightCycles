@@ -82,7 +82,12 @@ export const BOARD_RESIZE_THRESHOLD_PX = 40
 // scoring, just follow it less faithfully — chance per tick of taking the second-best move
 // instead of the best ('normal'), or a uniformly random non-instantly-fatal move instead of the
 // best ('easy'). Reaction speed is never nerfed, only decision quality — see useGameState.ts.
-export const CPU_NORMAL_SUBOPTIMAL_CHANCE = 0.15
+// CPU_NORMAL_SUBOPTIMAL_CHANCE is rolled independently every tick (~16/sec at the default speed
+// tier), so it compounds fast — 0.15 meant a >90% chance of at least one off-best move per second,
+// which read as the bot zigzagging into itself and dying almost immediately instead of playing out
+// a real match. Lowered so 'normal' still wobbles off the optimal line occasionally, but survives
+// long enough to be a genuine opponent instead of a chaotic self-elimination.
+export const CPU_NORMAL_SUBOPTIMAL_CHANCE = 0.05
 export const CPU_EASY_RANDOM_CHANCE = 0.5
 
 // Caps countReachableCells' flood fill (see cpuAi.ts/floodFill.ts) at this many cells. Once a

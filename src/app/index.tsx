@@ -1,24 +1,25 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
 import { router } from 'expo-router'
-import * as ScreenOrientation from 'expo-screen-orientation'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AnimatedHeroTitle } from '@/components/AnimatedHeroTitle'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { GameMode, GameSettings } from '@/types'
 
 export default function HomeScreen() {
-  // The title screen is always a single, un-split surface both players read right-side-up
-  // together — locked to portrait regardless of the chosen in-round orientation mode, which only
-  // takes effect once /game mounts its own lock.
-  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-
   const { settings, setSettings } = useGameSettings()
+  // orientationMode just follows the device's current physical shape (see useDeviceOrientation),
+  // so the title screen rotates along with everywhere else as soon as the phone is turned — Lock
+  // Orientation (see SettingsDialog) is the opt-in for pinning it.
+  const orientationMode = useDeviceOrientation()
+  useOrientationLock(settings.lockOrientation, orientationMode)
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { colors, dark } = useAutoPaperTheme()
   const insets = useSafeAreaInsets()
@@ -72,7 +73,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     flex: 1,
-    gap: 48,
+    gap: 72,
     justifyContent: 'center'
   },
   topLeft: {

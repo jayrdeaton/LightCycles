@@ -1,13 +1,13 @@
 import { isValidSettings } from '@/utils/gameSettingsValidation'
 
 const VALID = {
-  orientationMode: 'faceToFace',
   speedTier: 'normal',
   speedRampEnabled: false,
   gameMode: 'twoPlayer',
   cpuDifficulty: 'normal',
   gridSizeTier: 'medium',
-  keyScheme: { 1: 'wasd', 2: 'arrows' }
+  keyScheme: { 1: 'wasd', 2: 'arrows' },
+  lockOrientation: false
 }
 
 describe('isValidSettings', () => {
@@ -16,9 +16,6 @@ describe('isValidSettings', () => {
   })
 
   it('accepts every valid enum value for each field', () => {
-    for (const orientationMode of ['faceToFace', 'sideBySide']) {
-      expect(isValidSettings({ ...VALID, orientationMode })).toBe(true)
-    }
     for (const speedTier of ['slow', 'normal', 'fast']) {
       expect(isValidSettings({ ...VALID, speedTier })).toBe(true)
     }
@@ -55,7 +52,6 @@ describe('isValidSettings', () => {
   })
 
   it('rejects an object with an invalid enum value', () => {
-    expect(isValidSettings({ ...VALID, orientationMode: 'portrait' })).toBe(false)
     expect(isValidSettings({ ...VALID, speedTier: 'ludicrous' })).toBe(false)
     expect(isValidSettings({ ...VALID, gameMode: 'coop' })).toBe(false)
     expect(isValidSettings({ ...VALID, cpuDifficulty: 'nightmare' })).toBe(false)
@@ -66,5 +62,10 @@ describe('isValidSettings', () => {
   it('rejects a non-boolean speedRampEnabled', () => {
     expect(isValidSettings({ ...VALID, speedRampEnabled: 'true' })).toBe(false)
     expect(isValidSettings({ ...VALID, speedRampEnabled: 1 })).toBe(false)
+  })
+
+  it('rejects a non-boolean lockOrientation', () => {
+    expect(isValidSettings({ ...VALID, lockOrientation: 'true' })).toBe(false)
+    expect(isValidSettings({ ...VALID, lockOrientation: 1 })).toBe(false)
   })
 })

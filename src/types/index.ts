@@ -40,7 +40,6 @@ export interface PlayerState {
 }
 
 export interface GameSettings {
-  orientationMode: OrientationMode
   speedTier: SpeedTier
   speedRampEnabled: boolean
   gameMode: GameMode
@@ -49,6 +48,10 @@ export interface GameSettings {
   // Web-only in practice (see TouchInputLayer.web.tsx) — native ignores it — but kept on the
   // shared settings shape rather than platform-split, same as every other field here.
   keyScheme: Record<Player, KeyScheme>
+  // Opt-in — see useOrientationLock. Off by default: the app-wide orientationMode (see
+  // useDeviceOrientation) just follows however the phone is actually being held, rather than being
+  // a stored preference itself.
+  lockOrientation: boolean
 }
 
 export interface GameState {

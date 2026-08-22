@@ -1,7 +1,6 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
-import * as ScreenOrientation from 'expo-screen-orientation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -10,10 +9,11 @@ import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LobbySharedControls } from '@/components/LobbySharedControls'
 import { ReadyButton } from '@/components/ReadyButton'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { usePopoverHost } from '@/hooks/usePopoverHost'
-import { CpuDifficulty, GridSizeTier, KeyScheme, OrientationMode, Player, SpeedTier } from '@/types'
+import { CpuDifficulty, GridSizeTier, KeyScheme, Player, SpeedTier } from '@/types'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
@@ -31,11 +31,6 @@ const SPEED_OPTIONS: { value: SpeedTier; label: string; icon: string }[] = [
   { value: 'fast', label: 'Fast', icon: 'rabbit' }
 ]
 
-const ORIENTATION_OPTIONS: { value: OrientationMode; label: string; description: string; icon: string }[] = [
-  { value: 'faceToFace', label: 'Face-to-Face', description: 'Portrait top/bottom', icon: 'crop-portrait' },
-  { value: 'sideBySide', label: 'Side-by-Side', description: 'Landscape left/right', icon: 'crop-landscape' }
-]
-
 // Escalating expression, echoing the same playful-tier convention as grid size's vehicles and
 // speed's animals rather than a plain skill-level label.
 const CPU_DIFFICULTY_OPTIONS: { value: CpuDifficulty; label: string; icon: string }[] = [
@@ -45,12 +40,6 @@ const CPU_DIFFICULTY_OPTIONS: { value: CpuDifficulty; label: string; icon: strin
 ]
 
 export default function LobbyScreen() {
-  // Both players read this screen right-side-up together while configuring — same reasoning as
-  // the title screen — regardless of the orientation mode being picked below for the match itself,
-  // which only takes effect once /game mounts its own lock. The *layout* below still visually
-  // splits/rotates per orientationMode; only the device's own physical rotation lock stays fixed.
-  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-
   // Read only from this screen's own route param, never from useGameSettings().gameMode — the
   // settings hook's AsyncStorage read is async, and racing it here could momentarily show the
   // wrong number of player panels.
@@ -59,6 +48,16 @@ export default function LobbyScreen() {
   const humanPlayers = useMemo(() => humanPlayersFor({ gameMode }), [gameMode])
 
   const { settings, setSettings, commitRoundSettings } = useGameSettings()
+  // orientationMode just follows the device's current physical shape (see useDeviceOrientation),
+  // CPU games included — how you're holding the phone right now decides the layout, not a stored
+  // per-round choice. This is what actually lets two players sit shoulder-to-shoulder and pick a
+  // color/control scheme at the same time once the phone is turned sideways, instead of squeezing
+  // two panels into a portrait-narrow row — and for vs-CPU, it's simply whichever way the solo
+  // player is holding it. Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
+  const orientationMode = useDeviceOrientation()
+  const isSideBySide = orientationMode === 'sideBySide'
+  useOrientationLock(settings.lockOrientation, orientationMode)
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   const insets = useSafeAreaInsets()
   const { colors: themeColors, dark } = useAutoPaperTheme()
@@ -109,7 +108,7 @@ export default function LobbyScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const p2IsHuman = humanPlayers.includes(2)
-  const isFaceToFace = settings.orientationMode === 'faceToFace'
+  const isFaceToFace = orientationMode === 'faceToFace'
 
   // Vs-CPU only has one human slot, so its Ready toggle renders standalone below both panels
   // instead of embedded in P1's own panel — see the solo layout below.
@@ -125,12 +124,16 @@ export default function LobbyScreen() {
   const sharedHost = gameMode === 'vsCpu' ? controlsHost : undefined
   // P2 sits at (or near) the screen's right edge in every layout except face-to-face's centered
   // top zone (where align is inconsequential either way, since a rotated, centered trigger has
-  // roughly equal room on both sides) — 'right' avoids the same off-screen overflow the shared
-  // orientation dropdown had.
+  // roughly equal room on both sides) — 'right' keeps its own popovers from overflowing off that
+  // edge.
   const p1Panel = <LobbyPlayerPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman keyScheme={settings.keyScheme[1]} onKeySchemeChange={(scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 1: scheme } })} otherKeyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} />
-  const p2Panel = <LobbyPlayerPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} onKeySchemeChange={p2IsHuman ? (scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 2: scheme } }) : undefined} otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} align='right' />
+  // Only two-player's P2 sits at (or near) the screen's right edge — vs-CPU's CPU panel stays well
+  // clear of it even in the side-by-side layout, so it centers like P1's does.
+  const p2Panel = <LobbyPlayerPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} onKeySchemeChange={p2IsHuman ? (scheme: KeyScheme) => setSettings({ keyScheme: { ...settings.keyScheme, 2: scheme } }) : undefined} otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} align={gameMode === 'twoPlayer' ? 'right' : undefined} />
 
-  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} orientationMode={gameMode === 'twoPlayer' ? settings.orientationMode : undefined} orientationOptions={gameMode === 'twoPlayer' ? ORIENTATION_OPTIONS : undefined} onOrientationChange={gameMode === 'twoPlayer' ? (value) => setSettings({ orientationMode: value }) : undefined} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
+  // Orientation is an app-wide preference now (see SettingsDialog), not a per-round choice here —
+  // this row no longer takes orientationMode/orientationOptions/onOrientationChange at all.
+  const sharedControls = <LobbySharedControls host={controlsHost} gridSizeTier={settings.gridSizeTier} gridSizeOptions={GRID_SIZE_OPTIONS} onGridSizeChange={(value) => setSettings({ gridSizeTier: value })} speedTier={settings.speedTier} speedOptions={SPEED_OPTIONS} onSpeedChange={(value) => setSettings({ speedTier: value })} cpuDifficulty={gameMode === 'vsCpu' ? settings.cpuDifficulty : undefined} cpuDifficultyOptions={gameMode === 'vsCpu' ? CPU_DIFFICULTY_OPTIONS : undefined} onCpuDifficultyChange={gameMode === 'vsCpu' ? (value: CpuDifficulty) => setSettings({ cpuDifficulty: value }) : undefined} accentColor={themeColors.primary} mutedColor={fgMuted} dark={dark} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
@@ -152,11 +155,15 @@ export default function LobbyScreen() {
             {p1Panel}
           </View>
         ) : (
-          // Side-by-side: both players sit upright next to each other, so the shared controls sit
-          // in their own row above, rather than squeezed into the narrow column between them.
+          // Side-by-side: both players sit shoulder-to-shoulder, so the shared controls sit in
+          // their own row above, rather than squeezed into the narrow column between them. Only
+          // reached once the phone is actually held in landscape (orientationMode tracks that
+          // live), so playersRow's plain left/right split lands as a roomy pair of full-height
+          // zones — spaced well apart (playersRowSpaced) since there's real width to spend now,
+          // rather than the cramped, barely-gapped columns a portrait split would force.
           <View style={styles.stackedZone}>
             {sharedControls}
-            <View style={styles.playersRow}>
+            <View style={[styles.playersRow, styles.playersRowSpaced]}>
               {p1Panel}
               {p2Panel}
             </View>
@@ -172,7 +179,7 @@ export default function LobbyScreen() {
           also shares this host, and elevating this row for *its* popovers too would tie the two,
           letting DOM order wrongly decide which one paints on top (see LobbyPlayerPanel and
           LobbySharedControls' matching ownPopoverOpen checks). */}
-          <View style={[styles.playersRow, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen]}>
+          <View style={[styles.playersRow, isSideBySide && styles.playersRowSpaced, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen]}>
             {p1Panel}
             {p2Panel}
           </View>
@@ -208,6 +215,13 @@ const styles = StyleSheet.create({
   },
   playersRowOpen: {
     zIndex: 100
+  },
+  // Side-by-side only applies once the phone is actually held in landscape, which is genuinely
+  // wide, so the two zones get real breathing room between them instead of playersRow's own
+  // tight, portrait-tuned gap. Wide enough that each player's popovers (color swatch grid,
+  // control-scheme dropdown) stay clear of the other's reach even when both are open at once.
+  playersRowSpaced: {
+    gap: 180
   },
   rotated180: {
     transform: [{ rotate: '180deg' }]

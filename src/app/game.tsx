@@ -1,7 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { router } from 'expo-router'
-import * as ScreenOrientation from 'expo-screen-orientation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, View } from 'react-native'
 import { Icon, Text } from 'react-native-paper'
@@ -12,12 +11,12 @@ import OnboardingOverlay from '@/components/OnboardingOverlay'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import TouchInputLayer from '@/components/TouchInputLayer'
 import { BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS } from '@/constants/game'
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
-import { useManualLandscape } from '@/hooks/useManualLandscape'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
-import { GameSettings, Player, RoundOutcome } from '@/types'
+import { GameSettings, OrientationMode, Player, RoundOutcome } from '@/types'
 import { humanPlayersFor } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
@@ -26,6 +25,7 @@ interface GameRoundProps {
   height: number
   settings: GameSettings
   colors: Record<Player, string>
+  orientationMode: OrientationMode
 }
 
 // Split out from GameScreen so useGameState's lazy initial state (see useGameState.ts) is always
@@ -34,8 +34,8 @@ interface GameRoundProps {
 // only ever runs once per mount. Keyed by its own size so a genuine resize (in practice only
 // possible on web, since native orientation is locked — see useOrientationLock) remounts a fresh
 // round at the new size instead of rendering a stale grid against a differently-sized container.
-function GameRound({ width, height, settings, colors }: GameRoundProps) {
-  const { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors)
+function GameRound({ width, height, settings, colors, orientationMode }: GameRoundProps) {
+  const { state, turn, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode)
   const humanPlayers = useMemo(() => humanPlayersFor(settings), [settings])
 
   // The persisted, cross-round defaults (not this round's already-locked-in `settings` prop above)
@@ -141,14 +141,14 @@ function GameRound({ width, height, settings, colors }: GameRoundProps) {
 
   return (
     <>
-      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={settings.orientationMode} />
-      <TouchInputLayer orientationMode={settings.orientationMode} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} keyScheme={settings.keyScheme} />
+      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} />
+      <TouchInputLayer orientationMode={orientationMode} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} keyScheme={settings.keyScheme} />
 
       {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown
       timers are scheduled once on mount with no pause hook of their own, so unmounting is what
       stops them ticking underneath the dialog, and remounting on close is what restarts the count
       from '3' instead of resuming mid-count with stale timers. */}
-      {state.phase === 'onboarding' && !settingsOpen && <OnboardingOverlay orientationMode={settings.orientationMode} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
+      {state.phase === 'onboarding' && !settingsOpen && <OnboardingOverlay orientationMode={orientationMode} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
 
       {state.phase === 'roundOver' && showResultDialog && !resultPeeked && (
         <View style={styles.overlay}>
@@ -204,15 +204,12 @@ export default function GameScreen() {
     if (!settings) router.replace('/')
   }, [settings])
 
-  // Native orientation stays portrait-locked everywhere, on purpose (matching every other screen's
-  // own PORTRAIT_UP lock) — sideBySide's landscape layout below is faked with a manual rotation
-  // transform (see useManualLandscape) rather than an actual OS rotation.
-  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+  // orientationMode just follows the device's current physical shape (see useDeviceOrientation) —
+  // Lock Orientation (an app-wide preference, see SettingsDialog) is the opt-in for pinning it.
+  const orientationMode = useDeviceOrientation()
+  useOrientationLock(settings?.lockOrientation ?? false, orientationMode)
 
-  const portraitInsets = useSafeAreaInsets()
-  const manualLandscape = useManualLandscape()
-  const isSideBySide = settings?.orientationMode === 'sideBySide'
-  const insets = isSideBySide ? manualLandscape.insets : portraitInsets
+  const insets = useSafeAreaInsets()
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const colors = useMemo<Record<Player, string>>(() => ({ 1: themeColors.primary, 2: themeColors.secondary }), [themeColors.primary, themeColors.secondary])
 
@@ -236,18 +233,11 @@ export default function GameScreen() {
 
   if (!settings) return null
 
-  const board = (
-    <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
-      {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} />}
-    </View>
-  )
-
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
-      {/* Side-by-side fakes landscape by rotating the whole board area 90° within a swapped-
-      dimension box (see useManualLandscape) rather than an actual OS rotation — face-to-face's
-      board sits straight in the (real, portrait) root with no such wrapper. */}
-      {isSideBySide ? <View style={manualLandscape.rotatedContainerStyle}>{board}</View> : board}
+      <View style={[styles.boardArea, { top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }]} onLayout={onBoardLayout}>
+        {boardSize && <GameRound key={`${boardSize.width}x${boardSize.height}`} width={boardSize.width} height={boardSize.height} settings={settings} colors={colors} orientationMode={orientationMode} />}
+      </View>
     </View>
   )
 }

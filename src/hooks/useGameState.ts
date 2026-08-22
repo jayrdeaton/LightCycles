@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { GRID_CELL_PX, MAX_TICK_DT_MS, scaleMsForCellPx, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_MIN_INTERVAL_MS, SPEED_TIER_INTERVAL_MS } from '@/constants/game'
-import { Direction, GameSettings, Player } from '@/types'
+import { Direction, GameSettings, OrientationMode, Player } from '@/types'
 import { applyCpuTurn } from '@/utils/cpuAi'
 import { applyTurnIntent, buildOccupiedSet, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
-export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>) {
+// orientationMode is passed separately rather than read off `settings` — it's derived live from
+// the device's current physical shape (see useDeviceOrientation), not a stored setting.
+export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode) {
   const cellPx = GRID_CELL_PX[settings.gridSizeTier]
 
-  const [state, setState] = useState(() => createInitialGameState(width, height, settings.orientationMode, colors, cellPx))
+  const [state, setState] = useState(() => createInitialGameState(width, height, orientationMode, colors, cellPx))
   // The interval the *last* tick actually advanced by — exposed so the board can animate each
   // player's head gliding into its new cell over exactly that duration (see GameBoard.tsx) instead
   // of snapping, which is what made a low-ish tick rate read as choppy even though the underlying
@@ -25,8 +27,8 @@ export function useGameState(width: number, height: number, settings: GameSettin
   }, [])
 
   const rematch = useCallback(() => {
-    setState(createInitialGameState(width, height, settings.orientationMode, colors, cellPx))
-  }, [width, height, settings.orientationMode, colors, cellPx])
+    setState(createInitialGameState(width, height, orientationMode, colors, cellPx))
+  }, [width, height, orientationMode, colors, cellPx])
 
   // ─── Tick loop ──────────────────────────────────────────────────────────
   // Runs only while 'playing' (the effect's own [state.phase] dependency tears it down the

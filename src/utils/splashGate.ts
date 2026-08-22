@@ -1,3 +1,3 @@
-import { createSplashGate } from '@rific/splash-gate'
+import { createGate } from '@rific/splash-gate'
 
-export const { markReady: markSplashReady, useReady: useSplashReady, pendingGates: pendingSplashGates } = createSplashGate(['theme', 'haptics', 'sound', 'fonts'] as const)
+export const { markReady: markSplashReady, useReady: useSplashReady, pendingGates: pendingSplashGates } = createGate(['theme', 'haptics', 'sound', 'fonts'] as const)

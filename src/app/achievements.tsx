@@ -1,6 +1,5 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
-import * as ScreenOrientation from 'expo-screen-orientation'
 import { StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -10,7 +9,9 @@ import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { safeBack } from '@/utils/navigation'
 
 export default function AchievementsScreen() {
-  useOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+  // No game content here to rotate for — always locked portrait, regardless of the Lock
+  // Orientation setting or how the phone is currently held.
+  useOrientationLock(true, 'faceToFace')
 
   const { dark } = useAutoPaperTheme()
   const insets = useSafeAreaInsets()
