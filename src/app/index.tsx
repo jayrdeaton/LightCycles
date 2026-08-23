@@ -28,9 +28,6 @@ export default function HomeScreen() {
   // own (slightly tinted) background role.
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
-  // Matches every other screen's own back-button/icon-row treatment (lobby.tsx, game.tsx,
-  // achievements.tsx) — a plain muted icon, not a filled FAB chip.
-  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   // Folds in what the old /mode-select screen's chooseMode() did — that screen only ever picked
   // gameMode, so its whole job now fits on two buttons here instead of a separate hop.
@@ -44,7 +41,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       <AnimatedHeroTitle color={fg} p1Color={colors.primary} p2Color={colors.secondary} />
 

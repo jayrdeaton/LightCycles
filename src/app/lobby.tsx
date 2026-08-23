@@ -175,6 +175,7 @@ export default function LobbyScreen() {
   }, [ready, humanPlayers, settings, gameMode, commitRoundSettings])
 
   const bg = dark ? '#000000' : '#FFFFFF'
+  const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const p2IsHuman = humanPlayers.includes(2)
@@ -203,10 +204,10 @@ export default function LobbyScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='arrow-left' iconColor={fgMuted} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
+      <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
       {/* Same top-right slot as the title screen's own cog (index.tsx) — settings stays reachable
       from the same place whether a player opens it before or after picking a mode. */}
-      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       {gameMode === 'twoPlayer' ? (
         isFaceToFace ? (

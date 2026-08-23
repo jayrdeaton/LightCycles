@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import GameBoardHost from '@/components/GameBoardHost'
 import OnboardingOverlay from '@/components/OnboardingOverlay'
 import { PowerupHud } from '@/components/PowerupHud'
+import RoundHistoryPips from '@/components/RoundHistoryPips'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import TouchInputLayer from '@/components/TouchInputLayer'
 import { BOARD_REORIENT_SETTLE_MS, BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS, TRAIL_GROWTH_RATE } from '@/constants/game'
@@ -65,6 +66,14 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
   // round already underway.
   const { settings: userSettings, setSettings: setUserSettings } = useGameSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Only asked once there's an actual score to lose (the pip row itself uses the same gate, see
+  // OnboardingOverlay) — the very first round's back button still exits immediately, since there's
+  // nothing yet for a confirmation to protect.
+  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
+  const onBackPress = useCallback(() => {
+    if (roundHistory.length > 0) setConfirmBackVisible(true)
+    else safeBack()
+  }, [roundHistory.length])
 
   const vibration = useVibration()
   const vibrationRef = useRef(vibration)
@@ -129,6 +138,7 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
+  const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
 
   const outcome = state.outcome
@@ -155,11 +165,11 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
       <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} currentDirections={currentDirections} keyScheme={settings.keyScheme} />
       {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} />}
 
-      {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown
-      timers are scheduled once on mount with no pause hook of their own, so unmounting is what
-      stops them ticking underneath the dialog, and remounting on close is what restarts the count
-      from '3' instead of resuming mid-count with stale timers. */}
-      {state.phase === 'onboarding' && !settingsOpen && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
+      {/* Unmounted (rather than merely hidden) while settings or the quit confirmation is open:
+      OnboardingOverlay's countdown timers are scheduled once on mount with no pause hook of their
+      own, so unmounting is what stops them ticking underneath either dialog, and remounting on
+      close is what restarts the count from '3' instead of resuming mid-count with stale timers. */}
+      {state.phase === 'onboarding' && !settingsOpen && !confirmBackVisible && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={beginPlaying} />}
 
       {state.phase === 'roundOver' && showResultDialog && !resultPeeked && (
         <View style={styles.overlay}>
@@ -178,20 +188,48 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
         </View>
       )}
 
-      {/* Left corner — opposite the settings cog below, which claims the top-right in every phase
-      that shows it. Sits over the dark backdrop when the dialog is up (a fixed light tint, since
-      that backdrop is always dark regardless of theme) and over the bare board when peeked
-      (theme-aware fgMuted, matching every other icon that sits directly on the board). */}
-      {state.phase === 'roundOver' && showResultDialog && <IconButton icon={resultPeeked ? 'eye-off-outline' : 'eye-outline'} iconColor={resultPeeked ? fgMuted : 'rgba(255,255,255,0.9)'} size={22} style={styles.peekButton} onPress={() => setResultPeeked((peeked) => !peeked)} accessibilityLabel={resultPeeked ? 'Show results' : 'Peek at board'} />}
+      {/* Same overlay+card shell as the round-over dialog above (right down to the shared
+      styles.overlay/overlayCard/overlayButton) so a mid-onboarding confirmation reads as the same
+      kind of dialog, not a one-off. The pip row (same component OnboardingOverlay itself uses)
+      shows exactly what's at stake instead of a sentence restating the round count. Cancel/Quit
+      reuse the app's own primary/secondary pairing (same two colors as index.tsx's One
+      Player/Two Player) rather than the theme's MD3 error role, which read as washed-out pastel
+      against this app's normal saturated palette — Cancel (the "stay" option, mirroring
+      Rematch's slot above) keeps primary, Quit takes secondary. */}
+      {confirmBackVisible && (
+        <View style={styles.overlay}>
+          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <Icon source='alert-circle-outline' size={64} color={themeColors.secondary} />
+            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: themeColors.secondary }]}>
+              Quit Match?
+            </Text>
+            <RoundHistoryPips roundHistory={roundHistory} p1Color={colors[1]} p2Color={colors[2]} />
+            <Button mode='contained' onPress={() => setConfirmBackVisible(false)} style={styles.overlayButton} buttonColor={themeColors.primary} textColor={themeColors.onPrimary}>
+              Cancel
+            </Button>
+            <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={themeColors.secondary} textColor={themeColors.onSecondary}>
+              Quit
+            </Button>
+          </View>
+        </View>
+      )}
 
-      {/* fgMuted (not themeColors.onSurface) — matches the muted gray every other screen's own
-      corner chrome uses (index.tsx, lobby.tsx), rather than the theme's full-strength text color. */}
-      {state.phase === 'onboarding' && <IconButton icon='arrow-left' iconColor={fgMuted} size={22} style={styles.backButton} onPress={safeBack} />}
+      {/* Left corner — opposite the settings cog below, which claims the top-right in every phase
+      that shows it. Sits over the dark backdrop when either dialog is up (a fixed light tint, since
+      that backdrop is always dark regardless of theme) and over the bare board when peeked
+      (theme-aware fg, matching every other icon that sits directly on the board). */}
+      {state.phase === 'roundOver' && showResultDialog && <IconButton icon={resultPeeked ? 'eye-off-outline' : 'eye-outline'} iconColor={resultPeeked ? fg : 'rgba(255,255,255,0.9)'} size={22} style={styles.peekButton} onPress={() => setResultPeeked((peeked) => !peeked)} accessibilityLabel={resultPeeked ? 'Show results' : 'Peek at board'} />}
+
+      {/* Full-strength theme-aware fg over the bare board, same as every other screen's own
+      back/settings corner chrome (index.tsx, lobby.tsx, achievements.tsx) — recolors to the fixed
+      light tint the moment the quit confirmation's own backdrop goes up over it, same as the cog
+      below. */}
+      {state.phase === 'onboarding' && <IconButton icon='arrow-left' iconColor={confirmBackVisible ? 'rgba(255,255,255,0.9)' : fg} size={22} style={styles.backButton} onPress={onBackPress} />}
       {/* Same top-right slot as every other screen's cog (index.tsx, lobby.tsx) — reachable during
-      the countdown and again once the round-over dialog is up, so it's always in the same place
-      regardless of which of the two overlays is on screen. Recolors the same way the peek button
-      (above) does during round-over, since it sits over the same backdrop/board there. */}
-      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && <IconButton icon='cog' iconColor={state.phase === 'roundOver' && !resultPeeked ? 'rgba(255,255,255,0.9)' : fgMuted} size={22} style={styles.settingsButton} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />}
+      the countdown, again once the round-over dialog is up, and again over the quit confirmation,
+      so it's always in the same place regardless of which overlay is on screen. Recolors the same
+      way the peek button (above) does whenever it's sitting over one of those dark backdrops. */}
+      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && <IconButton icon='cog' iconColor={(state.phase === 'roundOver' && !resultPeeked) || confirmBackVisible ? 'rgba(255,255,255,0.9)' : fg} size={22} style={styles.settingsButton} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />}
 
       <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} settings={userSettings} setSettings={setUserSettings} />
     </>
@@ -315,7 +353,10 @@ const styles = StyleSheet.create({
     gap: 16,
     padding: 32
   },
-  overlayTitle: { fontWeight: 'bold' },
+  // headlineLarge's own line-height leaves slack under the glyphs that the flex `gap` above stacks
+  // on top of, reading as extra room below the title specifically (most visible once the pip row
+  // sits right after it, next to a button with no such slack) — this claws it back.
+  overlayTitle: { fontWeight: 'bold', marginBottom: -8 },
   peekButton: { left: 4, position: 'absolute', top: 4 },
   reorientingText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
   reorientingZone: {

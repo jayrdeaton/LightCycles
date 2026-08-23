@@ -45,42 +45,72 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
   return (
     <Dialog visible={visible} onDismiss={onDismiss} style={styles.dialog}>
       <Dialog.Title>Settings</Dialog.Title>
-      <Dialog.ScrollArea>
+      {/* react-native-paper's Dialog.ScrollArea has a fixed 24px marginBottom baked in (meant to
+          reserve room for a Dialog.Actions row below it) — overridden to 0 since this dialog has
+          no actions row, and that gap otherwise reads as unexplained empty footer space. */}
+      <Dialog.ScrollArea style={styles.scrollArea}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <TouchableRipple onPress={() => setSettings({ lockOrientation: !settings.lockOrientation })} style={styles.toggleButton} accessibilityLabel={`Lock orientation ${settings.lockOrientation ? 'on' : 'off'}`}>
-            <View style={styles.toggleContent}>
-              <SettingIcon source={settings.lockOrientation ? 'lock' : 'lock-open-variant-outline'} color={settings.lockOrientation ? colors.secondary : colors.onSurfaceVariant} containerColor={settings.lockOrientation ? colors.secondaryContainer : colors.surfaceVariant} />
-              <View style={styles.flexShrink}>
-                <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                  Lock Orientation
-                </Text>
-                <Text variant='bodySmall' numberOfLines={1} style={{ color: colors.onSurfaceVariant }}>
-                  Pins the current layout
-                </Text>
+          {/* Grouped tightly together (styles.toggleGroup's small internal gap, not the 24px gap
+              between sections below) since both are the same bare-row shape — Sound only joins
+              this group on web; elsewhere it's a full "SOUND & HAPTICS" section instead (see
+              below), which already carries its own heading/spacing and reads fine standing apart. */}
+          <View style={styles.toggleGroup}>
+            <TouchableRipple onPress={() => setSettings({ lockOrientation: !settings.lockOrientation })} style={styles.toggleButton} accessibilityLabel={`Lock orientation ${settings.lockOrientation ? 'on' : 'off'}`}>
+              <View style={styles.toggleContent}>
+                <SettingIcon source={settings.lockOrientation ? 'lock' : 'lock-open-variant-outline'} color={settings.lockOrientation ? colors.secondary : colors.onSurfaceVariant} containerColor={settings.lockOrientation ? colors.secondaryContainer : colors.surfaceVariant} />
+                <View style={styles.flexShrink}>
+                  <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                    Lock Orientation
+                  </Text>
+                  <Text variant='bodySmall' numberOfLines={1} style={{ color: colors.onSurfaceVariant }}>
+                    Pins the current layout
+                  </Text>
+                </View>
               </View>
+            </TouchableRipple>
+
+            {Platform.OS === 'web' && (
+              // No haptics on web at all — a SegmentedButtons with a single button renders as one
+              // giant unbroken bar with no on/off contrast (nothing to segment against), which reads
+              // as broken chrome rather than a toggle. A bare row matching Lock Orientation above
+              // (no section heading — the row's own "Sound" label already says what it is, a
+              // "SOUND" heading above it would just repeat that) reads correctly with one control.
+              <TouchableRipple onPress={() => setSoundSettings({ enabled: !soundSettings.enabled })} style={styles.toggleButton} accessibilityLabel={`Sound ${soundSettings.enabled ? 'on' : 'off'}`}>
+                <View style={styles.toggleContent}>
+                  <SettingIcon source={soundSettings.enabled ? 'volume-high' : 'volume-off'} color={soundSettings.enabled ? colors.tertiary : colors.onSurfaceVariant} containerColor={soundSettings.enabled ? colors.tertiaryContainer : colors.surfaceVariant} />
+                  <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                    Sound
+                  </Text>
+                </View>
+              </TouchableRipple>
+            )}
+          </View>
+
+          {Platform.OS !== 'web' && (
+            <View style={styles.section}>
+              <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
+                SOUND & HAPTICS
+              </Text>
+              <SegmentedButtons
+                multiSelect
+                value={[...(soundSettings.enabled ? ['sound'] : []), ...(hapticSettings.vibrate ? ['haptics'] : [])]}
+                onValueChange={(values) => {
+                  setSoundSettings({ enabled: values.includes('sound') })
+                  setHapticSettings({ vibrate: values.includes('haptics') })
+                }}
+                buttons={[
+                  { value: 'sound', icon: 'volume-high', accessibilityLabel: 'Sound' },
+                  { value: 'haptics', icon: 'vibrate', accessibilityLabel: 'Haptics' }
+                ]}
+              />
             </View>
-          </TouchableRipple>
+          )}
 
           <View style={styles.section}>
             <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
               APPEARANCE
             </Text>
             <AutoAppearancePicker showLabels={false} />
-          </View>
-
-          <View style={styles.section}>
-            <Text variant='labelMedium' style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>
-              SOUND & HAPTICS
-            </Text>
-            <SegmentedButtons
-              multiSelect
-              value={[...(soundSettings.enabled ? ['sound'] : []), ...(Platform.OS !== 'web' && hapticSettings.vibrate ? ['haptics'] : [])]}
-              onValueChange={(values) => {
-                setSoundSettings({ enabled: values.includes('sound') })
-                if (Platform.OS !== 'web') setHapticSettings({ vibrate: values.includes('haptics') })
-              }}
-              buttons={[{ value: 'sound', icon: 'volume-high', accessibilityLabel: 'Sound' }, ...(Platform.OS !== 'web' ? [{ value: 'haptics', icon: 'vibrate', accessibilityLabel: 'Haptics' }] : [])]}
-            />
           </View>
 
           <View style={styles.section}>
@@ -120,6 +150,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36
   },
+  scrollArea: {
+    marginBottom: 0
+  },
   section: {
     gap: 12
   },
@@ -141,5 +174,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12
+  },
+  toggleGroup: {
+    gap: 4
   }
 })

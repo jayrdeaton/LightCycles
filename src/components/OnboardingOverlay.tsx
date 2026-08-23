@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 
+import RoundHistoryPips from '@/components/RoundHistoryPips'
 import { MONO_FONT } from '@/constants/fonts'
 import { ONBOARDING_COUNTDOWN_STEP_MS, ONBOARDING_FADE_MS, ONBOARDING_GO_HOLD_MS } from '@/constants/game'
 import { useGameSound } from '@/hooks/useGameSound'
@@ -20,8 +21,6 @@ export interface OnboardingOverlayProps {
   roundHistory: RoundOutcome[]
   onComplete: () => void
 }
-
-const DRAW_PIP_COLOR = '#9E9E9E'
 
 const COUNTDOWN_STAGES = ['3', '2', '1', 'GO!']
 
@@ -89,10 +88,8 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPla
           used for the two-zone case below) since a solo zone's countdown is already dead-center —
           overlaying pips there would sit right on top of the digit instead of under it. */}
           {roundHistory.length > 0 && (
-            <View style={[styles.pipRow, styles.pipRowStacked]}>
-              {roundHistory.map((result, i) => (
-                <View key={i} style={[styles.pip, { backgroundColor: result.type === 'win' ? (result.winner === 1 ? p1Color : p2Color) : DRAW_PIP_COLOR }]} />
-              ))}
+            <View style={styles.pipRowStacked}>
+              <RoundHistoryPips roundHistory={roundHistory} p1Color={p1Color} p2Color={p2Color} />
             </View>
           )}
         </View>
@@ -107,11 +104,7 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPla
 
           {roundHistory.length > 0 && (
             <View style={styles.pipRowWrap}>
-              <View style={styles.pipRow}>
-                {roundHistory.map((result, i) => (
-                  <View key={i} style={[styles.pip, { backgroundColor: result.type === 'win' ? (result.winner === 1 ? p1Color : p2Color) : DRAW_PIP_COLOR }]} />
-                ))}
-              </View>
+              <RoundHistoryPips roundHistory={roundHistory} p1Color={p1Color} p2Color={p2Color} />
             </View>
           )}
         </>
@@ -132,23 +125,6 @@ const styles = StyleSheet.create({
   },
   countdownFlipped: {
     transform: [{ rotate: '180deg' }]
-  },
-  pip: {
-    borderColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 5,
-    borderWidth: 1.5,
-    height: 10,
-    width: 10
-  },
-  pipRow: {
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    borderRadius: 12,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8
   },
   // Solo zone only — the countdown digit and this row are both children of the same centered
   // zone, so this margin is what separates them instead of the digit's own line-height doing it.
