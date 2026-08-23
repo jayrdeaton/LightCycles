@@ -295,7 +295,7 @@ describe('tickGame', () => {
       ])
     })
 
-    it('Stasis fully skips movement for a tick, but still resolves a queued direction', () => {
+    it('Stasis fully skips movement for a tick, and leaves the queued direction pending (not yet resolved)', () => {
       const state = makeState({
         players: {
           1: ps({ trail: [{ x: 2, y: 5 }], direction: 'right', pendingDirection: 'up', color: '#3B82F6', effects: { speed: { type: 'stasis', multiplier: 0, expiresAtTick: 100 }, control: null, shield: null } }),
@@ -304,8 +304,74 @@ describe('tickGame', () => {
       })
       const next = tickGame(state)
       expect(next.players[1].trail).toEqual([{ x: 2, y: 5 }])
+      // `direction` stays pinned to the pre-freeze value — the player hasn't actually moved 'up'
+      // yet, so nothing has invalidated 'right' as the reference for the next opposite-turn check.
+      expect(next.players[1].direction).toBe('right')
+      expect(next.players[1].pendingDirection).toBe('up')
+    })
+
+    it('resolves the queued direction into `direction` on the tick a frozen player actually unfreezes and steps', () => {
+      // expiresAtTick 1 means the Stasis effect is still the active speed effect for computing this
+      // very tick's step count (0 steps, tick 0 -> 1) — it only actually clears via `expire()` at
+      // the end of that same tick, so the player only starts moving normally on the tick after.
+      const state = makeState({
+        players: {
+          1: ps({ trail: [{ x: 2, y: 5 }], direction: 'right', pendingDirection: 'up', color: '#3B82F6', effects: { speed: { type: 'stasis', multiplier: 0, expiresAtTick: 1 }, control: null, shield: null } }),
+          2: ps({ trail: [{ x: 0, y: 0 }], direction: 'down', color: '#EF4444' })
+        }
+      })
+      const frozenTick = tickGame(state)
+      expect(frozenTick.players[1].trail).toEqual([{ x: 2, y: 5 }])
+      expect(frozenTick.players[1].direction).toBe('right')
+      expect(frozenTick.players[1].pendingDirection).toBe('up')
+      expect(frozenTick.players[1].effects.speed).toBeNull()
+
+      const next = tickGame(frozenTick)
+      expect(next.players[1].trail).toEqual([
+        { x: 2, y: 5 },
+        { x: 2, y: 4 }
+      ])
       expect(next.players[1].direction).toBe('up')
       expect(next.players[1].pendingDirection).toBeNull()
+    })
+
+    // Regression test for a reported bug: travelling left, frozen by Stasis, swipe up then swipe
+    // right (each individually legal against the direction at the moment of the swipe) used to
+    // compound into a full 180° once both swipes had each been resolved into `direction` on their
+    // own frozen tick — so the player came out of Stasis still trailed to their right and
+    // immediately died stepping back into their own trail. The second turn intent must be rejected
+    // as an opposite-direction reversal instead, exactly as it would be if the player were never
+    // frozen at all.
+    it('never lets two turns queued across separate frozen ticks compound into an unnoticed 180°', () => {
+      let state = makeState({
+        players: {
+          1: ps({
+            trail: [
+              { x: 4, y: 5 },
+              { x: 3, y: 5 },
+              { x: 2, y: 5 }
+            ],
+            direction: 'left',
+            color: '#3B82F6',
+            effects: { speed: { type: 'stasis', multiplier: 0, expiresAtTick: 100 }, control: null, shield: null }
+          }),
+          2: ps({ trail: [{ x: 0, y: 0 }], direction: 'down', color: '#EF4444' })
+        }
+      })
+
+      // First swipe while frozen: 'up' is legal (not opposite of 'left').
+      state = applyTurnIntent(state, 1, 'up')
+      expect(state.players[1].pendingDirection).toBe('up')
+
+      // A frozen tick passes — still no movement, and (with the fix) `direction` stays 'left'.
+      state = tickGame(state)
+      expect(state.players[1].direction).toBe('left')
+      expect(state.players[1].pendingDirection).toBe('up')
+
+      // Second swipe while still frozen: 'right' IS opposite of the player's real direction
+      // ('left'), so it must be rejected — the earlier 'up' stays queued.
+      state = applyTurnIntent(state, 1, 'right')
+      expect(state.players[1].pendingDirection).toBe('up')
     })
 
     it('clears a speed effect once its expiresAtTick has passed', () => {

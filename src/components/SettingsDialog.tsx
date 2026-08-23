@@ -69,25 +69,32 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
               </View>
             </TouchableRipple>
 
-            <TouchableRipple onPress={() => setSoundSettings({ enabled: !soundSettings.enabled })} style={styles.toggleButton} accessibilityLabel={`Sound ${soundSettings.enabled ? 'on' : 'off'}`}>
-              <View style={styles.toggleContent}>
-                <SettingIcon source={soundSettings.enabled ? 'volume-high' : 'volume-off'} color={soundSettings.enabled ? colors.tertiary : colors.onSurfaceVariant} containerColor={soundSettings.enabled ? colors.tertiaryContainer : colors.surfaceVariant} />
-                <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                  Sound
-                </Text>
-              </View>
-            </TouchableRipple>
-
-            {Platform.OS !== 'web' && (
-              <TouchableRipple onPress={() => setHapticSettings({ vibrate: !hapticSettings.vibrate })} style={styles.toggleButton} accessibilityLabel={`Haptics ${hapticSettings.vibrate ? 'on' : 'off'}`}>
+            {/* Side by side, not stacked — neither needs a full row's width (single-line label,
+                no description under it the way Lock Orientation has), so sharing one row reads
+                just as clearly and takes half the vertical space. toggleRow carries the same
+                edge-alignment negative margin toggleButton normally carries itself; the buttons
+                inside it use toggleButtonInRow (flex: 1) instead so the two don't double up on it. */}
+            <View style={styles.toggleRow}>
+              <TouchableRipple onPress={() => setSoundSettings({ enabled: !soundSettings.enabled })} style={styles.toggleButtonInRow} accessibilityLabel={`Sound ${soundSettings.enabled ? 'on' : 'off'}`}>
                 <View style={styles.toggleContent}>
-                  <SettingIcon source={hapticSettings.vibrate ? 'vibrate' : 'vibrate-off'} color={hapticSettings.vibrate ? colors.tertiary : colors.onSurfaceVariant} containerColor={hapticSettings.vibrate ? colors.tertiaryContainer : colors.surfaceVariant} />
+                  <SettingIcon source={soundSettings.enabled ? 'volume-high' : 'volume-off'} color={soundSettings.enabled ? colors.tertiary : colors.onSurfaceVariant} containerColor={soundSettings.enabled ? colors.tertiaryContainer : colors.surfaceVariant} />
                   <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
-                    Haptics
+                    Sound
                   </Text>
                 </View>
               </TouchableRipple>
-            )}
+
+              {Platform.OS !== 'web' && (
+                <TouchableRipple onPress={() => setHapticSettings({ vibrate: !hapticSettings.vibrate })} style={styles.toggleButtonInRow} accessibilityLabel={`Haptics ${hapticSettings.vibrate ? 'on' : 'off'}`}>
+                  <View style={styles.toggleContent}>
+                    <SettingIcon source={hapticSettings.vibrate ? 'vibrate' : 'vibrate-off'} color={hapticSettings.vibrate ? colors.tertiary : colors.onSurfaceVariant} containerColor={hapticSettings.vibrate ? colors.tertiaryContainer : colors.surfaceVariant} />
+                    <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                      Haptics
+                    </Text>
+                  </View>
+                </TouchableRipple>
+              )}
+            </View>
           </View>
 
           <View style={styles.section}>
@@ -154,6 +161,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
+  // Same shape as toggleButton but `flex: 1` instead of its own `marginHorizontal: -12` — two of
+  // these side by side in toggleRow would otherwise both pull inward and collide in the middle.
+  // toggleRow carries that edge-alignment margin once, for the row as a whole, instead.
+  toggleButtonInRow: {
+    borderRadius: 12,
+    flex: 1,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   toggleContent: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -161,5 +178,10 @@ const styles = StyleSheet.create({
   },
   toggleGroup: {
     gap: 4
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginHorizontal: -12
   }
 })

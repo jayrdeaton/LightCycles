@@ -41,8 +41,13 @@ export function buildOccupiedSet(players: Record<Player, PlayerState>): Set<stri
 // the requested direction is a no-op (already heading that way) or a 180° reversal into the
 // player's own trail — enforced here, once, rather than by every input source that could dispatch
 // a turn. A frozen (Stasis'd) player can still queue a turn here — it just won't move this tick;
-// see tickGame's own handling of a 0-step player, which still resolves pendingDirection into
-// `direction` every tick so a queued turn survives to whenever they unfreeze.
+// see tickGame's own handling of a 0-step player, which leaves `direction` pinned to whichever way
+// the player was actually last moving (only `pendingDirection` changes) until they unfreeze. That
+// pin is what makes the opposite-direction check above safe across multiple frozen ticks: if
+// `direction` resolved every tick the way a moving player's does, two individually-legal 90° turns
+// queued back to back while frozen (e.g. left→up, then up→right) would compound into a net 180°
+// that this check never sees coming — the player then unfreezes still facing "left" on the trail
+// but instantly steps right into the cell they just came from.
 export function applyTurnIntent(state: GameState, player: Player, direction: Direction): GameState {
   if (state.phase !== 'playing') return state
   const p = state.players[player]
@@ -406,13 +411,18 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
     shield: effects.shield && tick >= effects.shield.expiresAtTick ? null : effects.shield
   })
 
+  // `direction` only resolves from `dir1`/`dir2` (and `pendingDirection` only clears) on a tick
+  // where that player actually stepped. A 0-step (Stasis'd) player keeps their pre-freeze
+  // `direction` and their still-unresolved `pendingDirection` untouched — see applyTurnIntent's own
+  // comment for why that pin matters (it's what stops turns queued across separate frozen ticks
+  // from compounding into an unnoticed 180°).
   return {
     ...state,
     tick,
     pickups: spawnedPickups,
     players: {
-      1: { ...p1, trail: trail1, direction: dir1, pendingDirection: null, heldPowerup: heldPowerup1, effects: expire(effects1) },
-      2: { ...p2, trail: trail2, direction: dir2, pendingDirection: null, heldPowerup: heldPowerup2, effects: expire(effects2) }
+      1: { ...p1, trail: trail1, direction: steps1 > 0 ? dir1 : p1.direction, pendingDirection: steps1 > 0 ? null : p1.pendingDirection, heldPowerup: heldPowerup1, effects: expire(effects1) },
+      2: { ...p2, trail: trail2, direction: steps2 > 0 ? dir2 : p2.direction, pendingDirection: steps2 > 0 ? null : p2.pendingDirection, heldPowerup: heldPowerup2, effects: expire(effects2) }
     }
   }
 }
