@@ -1,10 +1,10 @@
 import { getContrastColor } from '@rific/auto-paper'
 import { Canvas, Circle, Line, Path, Skia, vec } from '@shopify/react-native-skia'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Easing, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx } from '@/constants/game'
+import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, PowerupPickup } from '@/types'
 import { cellToPixel } from '@/utils/grid'
 
@@ -239,6 +239,16 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   // Wall-clock time (see lastTickAtRef below) the previous glide actually started at — always set
   // by the reset branch before the animate branch can read it.
   const lastTickAtRef = useRef(0)
+  // The chain of cells a Prune or Shield break-through just severed from the front, ordered from
+  // the break point (nearest the surviving trail) to the old tail (farthest) — see the severed-eat
+  // effect and severedPath below. Grid coordinates, not pixels, so cellPx changing (it never does
+  // mid-round, but nothing here should assume that) wouldn't desync it. Plain objects rather than
+  // GridCell[] directly only because a shared value's contents need to be worklet-safe/serializable.
+  const severedCells = useSharedValue<{ x: number; y: number }[]>([])
+  // 0 = the full severed chain still visible, 1 = fully eaten away — see severedPath, which draws
+  // only the suffix of severedCells still "ahead of" this progress. Starts at 1 (nothing to show)
+  // rather than 0, so an idle trail with no severed segment yet doesn't render one.
+  const severedProgress = useSharedValue(1)
 
   useEffect(() => {
     if (tick === 0) {
@@ -255,6 +265,12 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
       edgeStartX.value = head.x
       edgeStartY.value = head.y
       lastTickAtRef.current = performance.now()
+      // A break's own eat-away can still be mid-flight the instant its round ends (see the
+      // severed-eat effect's own comment on why that's fine to just let vanish) — clear it here so
+      // a rematch's fresh trail doesn't inherit a stale, unrelated severed segment left over from
+      // wherever the previous round's animation happened to stop.
+      severedCells.value = []
+      severedProgress.value = 1
       return
     }
     // Duration is measured against the actual gap since the previous tick's glide started, not
@@ -288,13 +304,144 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick])
 
-  // Every settled cell except the first and last, which are instead tracked live by
-  // (tailAnimX, tailAnimY) and (animX, animY) below so both ends glide into place rather than
-  // snapping.
-  const settledPath = useMemo(() => trailPath(trail.slice(1, -1), cellPx), [trail, cellPx])
+  // Detects a Prune/Shield-break severing more than one cell off the trail's front in one go, and
+  // kicks off severedPath's eat-away for exactly that chain of cells. Compares against the trail
+  // this component saw on its OWN last run (a plain ref is fine here — read and written only
+  // inside this effect, never during render) rather than trail.length, which can't tell "1 cell
+  // trimmed" from "40 cells severed" and wouldn't have the actual cut cells to animate through
+  // anyway. Keyed on `trail` itself, not `tick`: a Prune activation (see useGameState.ts's
+  // `activate`) trims the trail independent of the tick loop entirely, so gating this on `tick`
+  // the way the glide effect above does would miss it until the next real tick happened to land.
+  const prevTrailRef = useRef(trail)
+  useEffect(() => {
+    const prevTrail = prevTrailRef.current
+    prevTrailRef.current = trail
+    const newFront = trail[0]
+    const cutIndex = prevTrail.findIndex((c) => c.x === newFront.x && c.y === newFront.y)
+    // 0 = nothing cut. 1 = the routine single-cell growth-tier trim, already handled smoothly by
+    // tailProgress/tailAnimX above — no jump to fix there. -1 = no relation at all to the previous
+    // trail (a fresh round's spawn cell vs. the last round's final trail), which this same check
+    // conveniently also skips correctly with no separate tick===0 case needed.
+    if (cutIndex <= 1) return
+    // Order: index 0 nearest the break (surviving trail), last index the old tail — the direction
+    // severedPath actually eats through, matching where a player's eye is already looking (the
+    // break just happened right there) rather than starting from the far, unwatched tail end.
+    const removedCells = prevTrail.slice(0, cutIndex).reverse()
+    const duration = Math.min(TRAIL_SEVER_EAT_MAX_MS, Math.max(TRAIL_SEVER_EAT_MIN_MS, removedCells.length * TRAIL_SEVER_EAT_MS_PER_CELL))
+    // The surviving tail is now at `tail` (trail[0], post-break) — snapped instantly rather than
+    // animated there, since the severed segment below is what now carries the "something just
+    // happened" visual. Without this, the tick effect's own withTiming (see above — it runs first
+    // within the same commit on a Shield break, which is tick-synchronized; this effect's plain
+    // assignment overrides it, same "last write this commit wins" trick edgeStartX's snapshot
+    // already relies on) would glide tailAnimX/Y from wherever it was toward the new, generally
+    // non-adjacent `tail` in a straight pixel-space line — the exact diagonal this whole mechanism
+    // exists to get rid of. Fresh fractional creep toward the new nextCenter (see tailTarget)
+    // resumes correctly from here on subsequent ticks with no special-casing needed.
+    //
+    // react-hooks/immutability doesn't recognize Reanimated's SharedValue as the deliberate,
+    // React-Compiler-exempt mutable escape hatch it is — every .value assignment in this file
+    // (animX/tailAnimX/edgeStartX above included) has this identical shape, and this project
+    // doesn't run the React Compiler itself (see eslint.config.cjs, where the rule is 'warn'-only
+    // for exactly this reason: a heads-up for a future migration, not an enforced constraint now).
+    /* eslint-disable react-hooks/immutability */
+    severedCells.value = removedCells.map((c) => ({ x: c.x, y: c.y }))
+    severedProgress.value = 0
+    severedProgress.value = withTiming(1, { duration, easing: Easing.linear })
+    tailAnimX.value = tail.x
+    tailAnimY.value = tail.y
+    /* eslint-enable react-hooks/immutability */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trail])
+
+  // The severed chain's currently-visible suffix, as a Skia path — a fractional point interpolated
+  // between whichever two cells severedProgress currently falls between (same "creep along one
+  // real segment" technique as tailTarget above), then straight lines through every cell after it
+  // to the old tail. Every point plotted is always either a real trail cell or a lerp between two
+  // ADJACENT ones, which is exactly what makes this immune to the bug it replaces: the old
+  // mechanism free-glided the tail's live position in raw pixel space toward wherever the trail's
+  // new front ended up, with nothing stopping that straight line from cutting across the board at
+  // an angle no real trail could ever occupy. Renders nothing (Skia strokes an empty/1-point path
+  // as nothing) once fully eaten, or when there's no severed segment at all — the idle default.
+  const severedPath = useDerivedValue(() => {
+    const cells = severedCells.value
+    const path = Skia.Path.Make()
+    if (cells.length < 2) return path
+    const eatenFloat = severedProgress.value * (cells.length - 1)
+    const eatenWhole = Math.floor(eatenFloat)
+    if (eatenWhole >= cells.length - 1) return path
+    const frac = eatenFloat - eatenWhole
+    const a = cells[eatenWhole]
+    const b = cells[eatenWhole + 1]
+    path.moveTo((a.x + (b.x - a.x) * frac) * cellPx + cellPx / 2, (a.y + (b.y - a.y) * frac) * cellPx + cellPx / 2)
+    for (let i = eatenWhole + 1; i < cells.length; i++) {
+      path.lineTo(cells[i].x * cellPx + cellPx / 2, cells[i].y * cellPx + cellPx / 2)
+    }
+    return path
+  })
+
+  // `anchorCell` is where the head stood BEFORE its most recent move, as a GRID cell — matching
+  // `trail`'s own element type, not `head`'s pixel one, since boundaryIndex below searches for it
+  // WITHIN `trail`; comparing pixel coordinates against grid ones there would never match at all.
+  // `prevHeadCell` is scratch state purely for detecting the transition; `anchorCell` is the actual
+  // payload, captured from `prevHeadCell`'s OLD value in the SAME render-phase update that advances
+  // `prevHeadCell` to the new head cell. This two-state split is required, not stylistic: React's
+  // "adjusting state during render" pattern (see
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders, the
+  // `trend`-derived-from-`prevCount` example) immediately re-invokes this component once
+  // `prevHeadCell` is updated, and `prevHeadCell` reads as the NEW head cell from that very
+  // re-invocation onward — a single `prevHeadCell` state, read anywhere outside this `if`, would
+  // desync by exactly one head-move, always resolving to the head's own index and quietly breaking
+  // the animated bridge to it. A ref would have the identical problem this pattern exists to avoid,
+  // plus reading it during render is unsafe (and lint-forbidden) under concurrent rendering; an
+  // effect-based update would land one render late, after `trail` had already moved on to yet
+  // another tick's data.
+  const headCell = trail[trail.length - 1]
+  const [prevHeadCell, setPrevHeadCell] = useState(headCell)
+  const [anchorCell, setAnchorCell] = useState(headCell)
+  if (headCell.x !== prevHeadCell.x || headCell.y !== prevHeadCell.y) {
+    setAnchorCell(prevHeadCell)
+    setPrevHeadCell(headCell)
+  }
+  // Index of anchorCell within the CURRENT trail array — the front animated segment's true fixed
+  // anchor (settledPath below stops there; everything past it is this tick's own new movement,
+  // tracked live by animX/animY instead so it glides into place rather than snapping). Re-looked-up
+  // fresh every render, rather than cached as an index alongside anchorCell, so it stays correct
+  // even when the trail's FRONT also shifted since anchorCell was captured — a Prune/Shield severing
+  // cells off the front (see the severed-eat effect below) can land on any render, not just the ones
+  // where the head itself also happens to move, and a cached index would silently point at whatever
+  // cell now sits at that position instead of at anchorCell's actual, possibly-shifted one. -1 (not
+  // found — anchorCell itself got severed away too, or a fresh round's spawn cell has no relation to
+  // the last round's final trail) clamps to 0: the whole current trail counts as new movement.
+  const foundIndex = trail.findIndex((c) => c.x === anchorCell.x && c.y === anchorCell.y)
+  const boundaryIndex = foundIndex === -1 ? 0 : foundIndex
+
+  // Every settled cell except the first and the ones this tick's own movement just added (which
+  // are instead tracked live by (tailAnimX, tailAnimY) and (animX, animY) below so both ends glide
+  // into place rather than snapping).
+  const settledPath = useMemo(() => trailPath(trail.slice(1, boundaryIndex + 1), cellPx), [trail, cellPx, boundaryIndex])
   const fullPath = useMemo(() => trailPath(trail, cellPx), [trail, cellPx])
 
-  const edgeStart = useDerivedValue(() => vec(edgeStartX.value, edgeStartY.value))
+  // trail[boundaryIndex] (this segment's true fixed anchor) and trail[1] (nextCell/nextCenter, the
+  // tail segment's own far end) are the exact same cell whenever boundaryIndex === 1 — the trail's
+  // only "middle" cell is both at once (the single-step-per-tick case this used to hardcode as
+  // trail.length === 3; boundaryIndex generalizes it to a boosted tick's larger step count too).
+  // settledPath (trail.slice(1, boundaryIndex+1)) is what's supposed to visually cover any slack
+  // between the two segments meeting there, but when boundaryIndex <= 1 that slice has at most one
+  // point — Skia strokes nothing for a path with no line segments — so there's no stroke left to
+  // mask even the small mismatch edgeStartX's own snapshot timing can leave (see its comment): the
+  // two segments could each land a pixel or two short of the shared cell and the result is a visible
+  // gap with nothing drawn between them. Using the real cell directly there instead of the snapshot
+  // costs nothing and guarantees the two segments meet exactly, independent of animation timing.
+  // boundaryIndex === 0 needs `tail` specifically, not `nextCenter` — trail[0] and trail[1] are
+  // DIFFERENT cells (unlike the boundaryIndex === 1 case, where trail[1] IS trail[boundaryIndex]),
+  // and substituting the wrong one here skips the tail-to-trail[1] cell entirely from this segment,
+  // opening a real gap wherever tailEdgeStart/tailEdgeEnd doesn't independently happen to cover the
+  // exact same span (see boundaryIndex's own comment for how it can land on 0: anchorCell itself
+  // getting severed away, or a boost active before the trail's grown past its own step count).
+  // Longer trails keep the snapshot: trail[boundaryIndex] is a cell neither `tail` nor `nextCenter`
+  // there.
+  const edgeAnchor = boundaryIndex === 0 ? tail : boundaryIndex === 1 ? nextCenter : null
+  const edgeStart = useDerivedValue(() => (edgeAnchor ? vec(edgeAnchor.x, edgeAnchor.y) : vec(edgeStartX.value, edgeStartY.value)))
   const edgeEnd = useDerivedValue(() => vec(animX.value, animY.value))
 
   const tailEdgeStart = useDerivedValue(() => vec(tailAnimX.value, tailAnimY.value))
@@ -318,6 +465,10 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
       {player.alive ? (
         <>
           <Path path={settledPath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} />
+          {/* The chain a Prune/Shield break just cut off `trail` entirely — no longer part of
+          settledPath/tailEdgeEnd's own data at all, but still visibly eating itself away for a
+          beat rather than just vanishing. See severedPath's own comment. */}
+          <Path path={severedPath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} />
           <Line p1={tailEdgeStart} p2={tailEdgeEnd} strokeWidth={trailWidth} strokeCap='round' color={player.color} />
           {/* Skipped once the tail's own segment already reaches the head (trail.length <= 2 —
           see tailEdgeEnd's comment): edgeStart is a snapshot of the head's own glide a moment

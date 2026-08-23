@@ -146,7 +146,7 @@ export const POWERUP_ALL_TYPES: PowerupType[] = ['overdrive', 'stasis', 'shield'
 // expiresAtTick comment. Tuned relative to 'normal' speed tier's ~16 ticks/sec.
 export const POWERUP_EFFECT_DURATION_TICKS: Record<'overdrive' | 'stasis' | 'shield' | 'hack' | 'overclock', number> = {
   overdrive: 40, // ~2.5s of self-boost
-  stasis: 24, // ~1.5s frozen — long enough to matter, short enough not to just stall the round
+  stasis: 24, // ~1.5s of forced opponent freeze — long enough to box them in, short enough not to just stall the round
   shield: 48, // ~3s armed window to actually reach a wall worth breaking through
   hack: 32, // ~2s of inverted opponent steering
   overclock: 32 // ~2s of forced opponent 2x speed
@@ -156,11 +156,24 @@ export const POWERUP_EFFECT_DURATION_TICKS: Record<'overdrive' | 'stasis' | 'shi
 // multiplier lookup, it's "skip movement entirely," handled as its own case in tickGame.
 export const POWERUP_SPEED_MULTIPLIER: Record<'overdrive' | 'overclock', 2> = { overdrive: 2, overclock: 2 }
 
-// Cells removed from the front of a trail on Prune activation — reuses trimTrailFront, the same
-// slice-off-the-front primitive tickGame's periodic trailGrowthTier trim already uses, just
-// applied all at once (and to both players) instead of gradually. Always leaves at least the head
-// cell intact (see trimTrailFront's own clamp).
-export const POWERUP_PRUNE_AMOUNT_CELLS = 15
+// Fraction of a trail's own current length removed from its front on Prune activation — reuses
+// trimTrailFront, the same slice-off-the-front primitive tickGame's periodic trailGrowthTier trim
+// already uses, just applied all at once (and to both players, each relative to its own length)
+// instead of gradually. Proportional rather than a fixed cell count so it stays a meaningful
+// "oh shit" panic button whether the round just started or has run long enough to leave a very
+// long trail. Always leaves at least the head cell intact (see trimTrailFront's own clamp).
+export const POWERUP_PRUNE_FRACTION = 0.5
+
+// How long the segment severed by a Prune or a Shield break-through takes to visually eat itself
+// away — see GameBoard.tsx's severed-segment animation, which replaces the instant, straight-line
+// jump the tail's own live position used to make toward wherever the trail's new front ended up
+// (routinely nowhere near the old one once several cells vanish at once, and never guaranteed to
+// be axis-aligned with it — hence the diagonal streak this exists to fix). Scaled by how many
+// cells actually got cut, clamped to a sane window either way: a 2-cell Shield nick shouldn't take
+// as long as a Prune severing half a long trail, but neither should feel instant or drag on.
+export const TRAIL_SEVER_EAT_MS_PER_CELL = 18
+export const TRAIL_SEVER_EAT_MIN_MS = 120
+export const TRAIL_SEVER_EAT_MAX_MS = 900
 
 // Visual sizing for the on-board "mystery box" pickup glyph (see GameBoard.tsx's Powerups layer,
 // which intentionally renders every pickup identically regardless of type) — floors above trail
@@ -185,7 +198,7 @@ export const POWERUP_PULSE_SCALE = 0.16
 // On-board head-effect-tell ring colors, keyed by what's actually driving the effect (not just its
 // axis) so Overdrive/Stasis/Overclock read as visually distinct despite Overdrive and Overclock
 // sharing the same 2x multiplier — a player should be able to tell "sped up because I chose to" from
-// "sped up because my opponent did this to me" at a glance.
+// "sped up/frozen because my opponent did this to me" at a glance.
 export const POWERUP_EFFECT_COLORS: Record<'overdrive' | 'stasis' | 'overclock' | 'hack' | 'shield', string> = {
   overdrive: '#FFC107', // gold — self speed-up
   stasis: '#29B6F6', // ice blue — frozen
@@ -213,20 +226,19 @@ export const POWERUP_ICONS: Record<PowerupType, string> = {
 export interface CpuPowerupAwareness {
   seekPickups: boolean // bias tied survival-safe directions toward a nearby pickup
   seekTieToleranceCells: number // how close two directions' space scores must be to let pickup-seeking break the tie
-  defensiveCounters: boolean // pop held Stasis when Overclocked into a tight spot, or Shield when truly cornered
+  defensiveCounters: boolean // pop held Shield when truly cornered
   opportunisticSelfUse: boolean // use held Overdrive/Prune proactively, not just reactively
-  offensiveUse: boolean // use held Hack/Overclock against the opponent when advantageous
+  offensiveUse: boolean // use held Hack/Overclock/Stasis against the opponent when advantageous
 }
 export const CPU_POWERUP_AWARENESS: Record<CpuDifficulty, CpuPowerupAwareness> = {
   easy: { seekPickups: false, seekTieToleranceCells: 0, defensiveCounters: true, opportunisticSelfUse: false, offensiveUse: false },
   normal: { seekPickups: true, seekTieToleranceCells: 20, defensiveCounters: true, opportunisticSelfUse: true, offensiveUse: true },
   hard: { seekPickups: true, seekTieToleranceCells: 40, defensiveCounters: true, opportunisticSelfUse: true, offensiveUse: true }
 }
-export const POWERUP_CPU_DANGER_SPACE_THRESHOLD = 15 // "tight spot" — reachable-cell floor that triggers a defensive Stasis/Shield pop
 export const POWERUP_CPU_OVERDRIVE_MIN_SPACE = 60 // "coast is clear" — floor for opportunistic Overdrive
 export const POWERUP_CPU_PRUNE_SPACE_THRESHOLD = 20 // use held Prune when maneuvering room is getting tight
-export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock
-export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock anyway, so 'normal'/'hard' don't hoard forever
+export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock/Stasis
+export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock/Stasis anyway, so 'normal'/'hard' don't hoard forever
 
 // Per-tick chance the CPU "notices" it's currently Hack'd and steers to compensate — reasoning
 // about the true best direction as always (see cpuAi.ts's chooseCpuDirection, which never itself

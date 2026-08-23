@@ -18,7 +18,7 @@ import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { useP1OnRight } from '@/hooks/useP1OnRight'
-import { GameSettings, OrientationMode, Player, RoundOutcome } from '@/types'
+import { Direction, GameSettings, OrientationMode, Player, RoundOutcome } from '@/types'
 import { humanPlayersFor } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
@@ -56,6 +56,9 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
   const { state, turn, activate, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode, p1OnRight)
   const humanPlayers = useMemo(() => humanPlayersFor(settings), [settings])
   const controlInverted = useMemo<Record<Player, boolean>>(() => ({ 1: state.players[1].effects.control !== null, 2: state.players[2].effects.control !== null }), [state.players])
+  // Fed to TouchInputLayer so it can gate turn feedback (sound/haptic) on a swipe that would
+  // actually turn the player — see isEffectiveTurn.
+  const currentDirections = useMemo<Record<Player, Direction>>(() => ({ 1: state.players[1].direction, 2: state.players[2].direction }), [state.players])
 
   // The persisted, cross-round defaults (not this round's already-locked-in `settings` prop above)
   // — matches every other screen's settings button, which always edits "next time," never the
@@ -149,7 +152,7 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
   return (
     <>
       <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} pickupColor={themeColors.tertiary} trailGrowthRate={TRAIL_GROWTH_RATE[settings.trailGrowthTier]} />
-      <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} keyScheme={settings.keyScheme} />
+      <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} currentDirections={currentDirections} keyScheme={settings.keyScheme} />
       {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} />}
 
       {/* Unmounted (rather than merely hidden) while settings is open: OnboardingOverlay's countdown

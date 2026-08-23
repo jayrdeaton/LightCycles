@@ -1,4 +1,4 @@
-import { POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE } from '@/constants/game'
+import { POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE } from '@/constants/game'
 import { GameState, PlayerState } from '@/types'
 import { applyCpuActivation, applyCpuTurn, chooseCpuDirection, shouldCpuActivate } from '@/utils/cpuAi'
 
@@ -215,25 +215,6 @@ describe('shouldCpuActivate', () => {
     expect(shouldCpuActivate(state, 'hard', new Set())).toBe(false)
   })
 
-  it('pops a defensive Stasis when Overclocked into a tight spot', () => {
-    const state = baseState()
-    state.players[2] = { ...state.players[2], trail: [{ x: 10, y: 10 }], direction: 'right', heldPowerup: 'stasis', effects: { speed: { type: 'overclock', multiplier: 2, expiresAtTick: 50 }, control: null, shield: null } }
-    // Wall the CPU in except for a sliver of room, keeping it under the danger threshold.
-    const occupied = new Set<string>()
-    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},9`)
-    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},11`)
-    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
-  })
-
-  it('does not pop Stasis just for being in a tight spot without an active Overclock', () => {
-    const state = baseState()
-    state.players[2] = { ...state.players[2], heldPowerup: 'stasis' }
-    const occupied = new Set<string>()
-    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},9`)
-    for (let x = 10; x <= 10 + POWERUP_CPU_DANGER_SPACE_THRESHOLD; x++) occupied.add(`${x},11`)
-    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(false)
-  })
-
   it('pops a held Shield when every direction is unsafe', () => {
     const state = baseState()
     state.players[2] = { ...state.players[2], trail: [{ x: 10, y: 10 }], direction: 'right', heldPowerup: 'shield' }
@@ -253,16 +234,18 @@ describe('shouldCpuActivate', () => {
     expect(shouldCpuActivate(state, 'hard', new Set())).toBe(true)
   })
 
-  it('uses Hack/Overclock offensively once the opponent is boxed in', () => {
-    const state = baseState()
-    state.players[1] = { ...state.players[1], trail: [{ x: 1, y: 1 }], direction: 'right' }
-    state.players[2] = { ...state.players[2], heldPowerup: 'hack' }
-    // Seals player 1 into a small 3x3 pocket (9 free cells, bounded by the grid edge on two sides
-    // and a wall on the other two) — comfortably under the offensive-use space threshold.
-    const occupied = new Set<string>()
-    for (let y = 0; y <= 2; y++) occupied.add(`3,${y}`)
-    for (let x = 0; x <= 2; x++) occupied.add(`${x},3`)
-    expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
+  it('uses Hack/Overclock/Stasis offensively once the opponent is boxed in', () => {
+    for (const heldPowerup of ['hack', 'overclock', 'stasis'] as const) {
+      const state = baseState()
+      state.players[1] = { ...state.players[1], trail: [{ x: 1, y: 1 }], direction: 'right' }
+      state.players[2] = { ...state.players[2], heldPowerup }
+      // Seals player 1 into a small 3x3 pocket (9 free cells, bounded by the grid edge on two sides
+      // and a wall on the other two) — comfortably under the offensive-use space threshold.
+      const occupied = new Set<string>()
+      for (let y = 0; y <= 2; y++) occupied.add(`3,${y}`)
+      for (let x = 0; x <= 2; x++) occupied.add(`${x},3`)
+      expect(shouldCpuActivate(state, 'hard', occupied)).toBe(true)
+    }
   })
 
   it('respects per-difficulty awareness — easy never uses Overdrive opportunistically', () => {
@@ -290,8 +273,7 @@ describe('shouldCpuActivate', () => {
 // Sanity check that the threshold constants used above are what the test math assumes.
 describe('powerup CPU awareness thresholds', () => {
   it('are positive, sane bounds', () => {
-    expect(POWERUP_CPU_DANGER_SPACE_THRESHOLD).toBeGreaterThan(0)
     expect(POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD).toBeGreaterThan(0)
-    expect(POWERUP_CPU_OVERDRIVE_MIN_SPACE).toBeGreaterThan(POWERUP_CPU_DANGER_SPACE_THRESHOLD)
+    expect(POWERUP_CPU_OVERDRIVE_MIN_SPACE).toBeGreaterThan(POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD)
   })
 })

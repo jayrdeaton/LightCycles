@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { applyControlInversion, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
+import { applyControlInversion, isEffectiveTurn, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -17,6 +17,11 @@ export interface TouchInputLayerProps {
   onActivate: (player: Player) => void
   controlInverted: Record<Player, boolean>
   keyScheme: Record<Player, KeyScheme>
+  // Each player's current heading, straight from game state — used to gate turn feedback
+  // (sound/haptic) on isEffectiveTurn, so continuing straight or reversing 180° (both of which
+  // applyTurnIntent silently no-ops in gameEngine.ts) doesn't fire feedback for a turn that never
+  // actually happens. See TouchInputLayer.tsx's identical prop.
+  currentDirections: Record<Player, Direction>
 }
 
 // One physical-key set per scheme (see the lobby's keyboard-scheme picker) — player 1 and player 2
@@ -46,7 +51,7 @@ interface TrackedPointer {
   lastDirection: Direction | null
 }
 
-export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, onActivate, controlInverted, keyScheme }: TouchInputLayerProps) {
+export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, onActivate, controlInverted, keyScheme, currentDirections }: TouchInputLayerProps) {
   // Synthetic translation vectors, one per key, fed through the same resolveTurnIntent() every
   // other input source uses (see TouchInputLayer.tsx) rather than a separate key -> Direction
   // table — one axis/direction mapping to get right and keep tested, not two.
@@ -93,15 +98,18 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       e.preventDefault()
       const direction = resolveTurnIntent({ player: mapped.player, translationX: mapped.translationX, translationY: mapped.translationY, orientationMode })
       if (direction) {
-        onTurn(mapped.player, applyControlInversion(direction, controlInverted[mapped.player]))
-        playTurn()
-        selection()
+        const invertedDirection = applyControlInversion(direction, controlInverted[mapped.player])
+        onTurn(mapped.player, invertedDirection)
+        if (isEffectiveTurn(invertedDirection, currentDirections[mapped.player])) {
+          playTurn()
+          selection()
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, keyMap, activateKeyMap, orientationMode, playTurn, playActivate, selection])
+  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, currentDirections, keyMap, activateKeyMap, orientationMode, playTurn, playActivate, selection])
 
   // Swipe input, mirroring TouchInputLayer.tsx's Pan gestures but via raw window pointer events —
   // react-native-gesture-handler has no bearing here (RNGH ships no web target this app pulls in),
@@ -159,9 +167,12 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       tracked.baseY = e.clientY
       if (direction !== tracked.lastDirection) {
         tracked.lastDirection = direction
-        onTurn(tracked.player, applyControlInversion(direction, controlInverted[tracked.player]))
-        playTurn()
-        selection()
+        const invertedDirection = applyControlInversion(direction, controlInverted[tracked.player])
+        onTurn(tracked.player, invertedDirection)
+        if (isEffectiveTurn(invertedDirection, currentDirections[tracked.player])) {
+          playTurn()
+          selection()
+        }
       }
     }
 
@@ -207,7 +218,7 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
       document.body.style.touchAction = previousTouchAction
       document.body.style.overscrollBehaviorX = previousOverscrollBehaviorX
     }
-  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, orientationMode, playTurn, playActivate, selection])
+  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, currentDirections, orientationMode, playTurn, playActivate, selection])
 
   return null
 }

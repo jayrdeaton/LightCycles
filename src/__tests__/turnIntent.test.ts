@@ -1,4 +1,4 @@
-import { flipDirection, resolveSwipeDirection, resolveTurnIntent } from '@/utils/turnIntent'
+import { flipDirection, isEffectiveTurn, resolveSwipeDirection, resolveTurnIntent } from '@/utils/turnIntent'
 
 describe('resolveSwipeDirection', () => {
   it('returns null for a drag shorter than the minimum threshold', () => {
@@ -49,5 +49,21 @@ describe('resolveTurnIntent', () => {
 
   it('returns null for sub-threshold drags regardless of mode or player', () => {
     expect(resolveTurnIntent({ player: 1, translationX: 4, translationY: 3, orientationMode: 'faceToFace' })).toBeNull()
+  })
+})
+
+describe('isEffectiveTurn', () => {
+  it('is false for a swipe matching the current heading (continuing straight)', () => {
+    expect(isEffectiveTurn('up', 'up')).toBe(false)
+  })
+
+  it('is false for a swipe reversing 180° into the current heading', () => {
+    expect(isEffectiveTurn('down', 'up')).toBe(false)
+    expect(isEffectiveTurn('left', 'right')).toBe(false)
+  })
+
+  it('is true for a swipe perpendicular to the current heading', () => {
+    expect(isEffectiveTurn('left', 'up')).toBe(true)
+    expect(isEffectiveTurn('right', 'up')).toBe(true)
   })
 })

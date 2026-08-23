@@ -6,7 +6,7 @@ import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { applyControlInversion, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
+import { applyControlInversion, isEffectiveTurn, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -27,6 +27,11 @@ export interface TouchInputLayerProps {
   // Web-only (see TouchInputLayer.web.tsx) — kept on the shared prop shape but unused here, same as
   // this file's own asymmetric use of humanPlayers relative to the web version.
   keyScheme: Record<Player, KeyScheme>
+  // Each player's current heading, straight from game state — used to gate turn feedback
+  // (sound/haptic) on isEffectiveTurn, so continuing straight or reversing 180° (both of which
+  // applyTurnIntent silently no-ops in gameEngine.ts) doesn't fire feedback for a turn that never
+  // actually happens.
+  currentDirections: Record<Player, Direction>
 }
 
 // Two independent single-finger Pan gestures, composed with Gesture.Simultaneous so neither can
@@ -36,7 +41,7 @@ export interface TouchInputLayerProps {
 // testing against that region, using each touch's start coordinate, IS the "classify by start
 // coordinate, not continuous tracking" the plan calls for; there's no extra manual classification
 // to write. The canvas underneath stays one undivided render — only touch handling is zoned.
-export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlayers, enabled, onTurn, onActivate, controlInverted }: TouchInputLayerProps) {
+export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlayers, enabled, onTurn, onActivate, controlInverted, currentDirections }: TouchInputLayerProps) {
   const [size, setSize] = useState({ width: 0, height: 0 })
   const solo = humanPlayers.length === 1
 
@@ -51,11 +56,14 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
 
   const handleTurn = useCallback(
     (player: Player, direction: Direction) => {
-      onTurn(player, applyControlInversion(direction, controlInverted[player]))
-      playTurn()
-      selection()
+      const invertedDirection = applyControlInversion(direction, controlInverted[player])
+      onTurn(player, invertedDirection)
+      if (isEffectiveTurn(invertedDirection, currentDirections[player])) {
+        playTurn()
+        selection()
+      }
     },
-    [onTurn, controlInverted, playTurn, selection]
+    [onTurn, controlInverted, currentDirections, playTurn, selection]
   )
 
   const handleActivate = useCallback(
@@ -86,10 +94,12 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
     // `base` tracks where the current segment started (in the gesture's own translation frame);
     // once a segment's delta crosses MIN_SWIPE_DISTANCE in some direction, `base` snaps to the
     // current point so the *next* segment is measured fresh, keeping detection responsive even
-    // after a long drag. Firing onTurn (and its sound/haptic) is gated on the direction actually
-    // changing from the last one recognized in this touch, so holding a straight line doesn't
-    // repeat the same turn every MIN_SWIPE_DISTANCE px — applyTurnIntent's own same-direction no-op
-    // (see gameEngine.ts) would make repeats harmless for the game state, but not for the feedback.
+    // after a long drag. Firing onTurn is gated on the direction actually changing from the last
+    // one recognized in this touch, so holding a straight line doesn't repeat the same dispatch
+    // every MIN_SWIPE_DISTANCE px. That alone doesn't stop feedback for a swipe along the player's
+    // current heading or its exact reverse — direction here still differs from lastDirection.value
+    // (null) the first time either is swiped in a touch — so handleTurn separately gates its own
+    // sound/haptic on isEffectiveTurn against the player's actual current heading.
     const makePlayerGesture = (player: Player, base: SharedValue<{ x: number; y: number }>, lastDirection: SharedValue<Direction | null>, hitSlop: { top?: number; bottom?: number; left?: number; right?: number }) => {
       const pan = Gesture.Pan()
         .maxPointers(1)

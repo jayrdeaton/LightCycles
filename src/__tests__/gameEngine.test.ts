@@ -1,5 +1,5 @@
-import { GRID_CELL_PX, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
-import { GameState, GridCell, PlayerState } from '@/types'
+import { GRID_CELL_PX, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_ALL_TYPES, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_FRACTION, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { GameState, GridCell, PlayerEffects, PlayerState } from '@/types'
 import { applyActivation, applyTurnIntent, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
 // Fills in the fields every fixture needs regardless of what it's actually testing, so each call
@@ -478,6 +478,30 @@ describe('tickGame', () => {
         expect(next.pickups).toHaveLength(1)
         expect(next.pickups[0].cell).toEqual({ x: 5, y: 5 })
       })
+
+      it('never spawns somewhere its own collection radius would overlap a trail, even on an otherwise-empty cell (edges are fine)', () => {
+        // A 3-cell wall down the middle of a small grid. Both players are frozen (Stasis'd) and
+        // contribute nothing to `occupied` themselves — it's passed in explicitly here, as exactly
+        // this wall — so there's no interference from anyone's own move this tick. (1,*) and (3,*)
+        // are individually empty but sit right beside the wall (within collection radius of it);
+        // only the (0,*) column, a full cell away, has a genuinely clear collection footprint.
+        const frozen: PlayerEffects = { speed: { type: 'stasis', multiplier: 0, expiresAtTick: 100 }, control: null, shield: null }
+        const state = makeState({
+          grid: { cols: 4, rows: 3 },
+          pickups: [],
+          players: {
+            1: ps({ trail: [{ x: 0, y: 0 }], direction: 'right', effects: frozen }),
+            2: ps({ trail: [{ x: 3, y: 2 }], direction: 'left', effects: frozen })
+          }
+        })
+        const occupied = new Set(['2,0', '2,1', '2,2'])
+
+        for (const random of [() => 0, () => 0.5, () => 0.99]) {
+          const next = tickGame(state, occupied, 1, POWERUP_ALL_TYPES, random)
+          expect(next.pickups).toHaveLength(1)
+          expect(next.pickups[0].cell.x).toBe(0)
+        }
+      })
     })
   })
 })
@@ -511,10 +535,11 @@ describe('applyActivation', () => {
     expect(next.players[2].effects.speed).toBeNull()
   })
 
-  it('Stasis sets a self speed effect with a 0 multiplier', () => {
+  it('Stasis sets a speed effect with a 0 multiplier on the OPPONENT, not the activator', () => {
     const state = activationState('stasis')
     const next = applyActivation(state, 1)
-    expect(next.players[1].effects.speed?.multiplier).toBe(0)
+    expect(next.players[1].effects.speed).toBeNull()
+    expect(next.players[2].effects.speed?.multiplier).toBe(0)
   })
 
   it('Shield sets a self shield effect', () => {
@@ -538,26 +563,26 @@ describe('applyActivation', () => {
     expect(next.players[2].effects.speed).toEqual({ type: 'overclock', multiplier: 2, expiresAtTick: 2 + POWERUP_EFFECT_DURATION_TICKS.overclock })
   })
 
-  it("Prune trims BOTH trails, but only clears the activating player's own inventory slot", () => {
+  it("Prune trims BOTH trails proportionally to each one's own length, but only clears the activating player's own inventory slot", () => {
     const state = activationState('prune', { players: { 1: { ...activationState('prune').players[1], heldPowerup: 'prune' }, 2: { ...activationState('prune').players[2], heldPowerup: 'overdrive' } } })
     const next = applyActivation(state, 1)
-    expect(next.players[1].trail).toHaveLength(20 - POWERUP_PRUNE_AMOUNT_CELLS)
-    expect(next.players[2].trail).toHaveLength(20 - POWERUP_PRUNE_AMOUNT_CELLS)
+    expect(next.players[1].trail).toHaveLength(20 - Math.floor(20 * POWERUP_PRUNE_FRACTION))
+    expect(next.players[2].trail).toHaveLength(20 - Math.floor(20 * POWERUP_PRUNE_FRACTION))
     expect(next.players[1].heldPowerup).toBeNull()
     expect(next.players[2].heldPowerup).toBe('overdrive')
   })
 
-  it('a same-axis activation replaces (does not stack with) an existing effect, with a fresh timer', () => {
-    // Player 2 is already under a long-lived Overclock (as if just hit by player 1), and is now
-    // holding a Stasis to counter it.
-    const state = activationState('overdrive', {
+  it('a same-axis activation replaces (does not stack with) an existing effect on the target, with a fresh timer', () => {
+    // Player 2 is already under a long-lived Overclock (as if just hit earlier), and player 1 now
+    // lands a Stasis on them — both are opponent-targeted speed effects, so the fresh one wins.
+    const state = activationState('stasis', {
       tick: 20,
       players: {
-        1: { ...activationState('overdrive').players[1] },
-        2: { ...activationState('overdrive').players[2], heldPowerup: 'stasis', effects: { speed: { type: 'overclock', multiplier: 2, expiresAtTick: 200 }, control: null, shield: null } }
+        1: { ...activationState('stasis').players[1] },
+        2: { ...activationState('stasis').players[2], effects: { speed: { type: 'overclock', multiplier: 2, expiresAtTick: 200 }, control: null, shield: null } }
       }
     })
-    const next = applyActivation(state, 2)
+    const next = applyActivation(state, 1)
     expect(next.players[2].effects.speed).toEqual({ type: 'stasis', multiplier: 0, expiresAtTick: 20 + POWERUP_EFFECT_DURATION_TICKS.stasis })
   })
 })

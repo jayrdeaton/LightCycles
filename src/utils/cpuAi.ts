@@ -1,4 +1,4 @@
-import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_HACK_COMPENSATION_CHANCE, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_DANGER_SPACE_THRESHOLD, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
+import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_HACK_COMPENSATION_CHANCE, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
 import { CpuDifficulty, Direction, GameState, GridCell, GridSize, Player, PlayerState, PowerupPickup, PowerupType } from '@/types'
 
 import { countReachableCells, distanceToNearestTarget } from './floodFill'
@@ -167,9 +167,6 @@ export function shouldCpuActivate(state: GameState, difficulty: CpuDifficulty, o
   const ownSpace = candidateSafety(cpuHead, cpu.pendingDirection ?? cpu.direction, state.grid, occupied, cpuOwnSteps, CPU_FLOOD_FILL_CAP).space
   const humanSpace = candidateSafety(humanHead, human.pendingDirection ?? human.direction, state.grid, occupied, stepsFor(human.effects), CPU_FLOOD_FILL_CAP).space
 
-  if (held === 'stasis' && awareness.defensiveCounters) {
-    return cpu.effects.speed?.type === 'overclock' && ownSpace >= 0 && ownSpace < POWERUP_CPU_DANGER_SPACE_THRESHOLD
-  }
   if (held === 'shield' && awareness.defensiveCounters) {
     return isCornered(cpu, state.grid, occupied, cpuOwnSteps)
   }
@@ -179,7 +176,7 @@ export function shouldCpuActivate(state: GameState, difficulty: CpuDifficulty, o
   if (held === 'prune' && awareness.opportunisticSelfUse) {
     return ownSpace >= 0 && ownSpace < POWERUP_CPU_PRUNE_SPACE_THRESHOLD
   }
-  if ((held === 'hack' || held === 'overclock') && awareness.offensiveUse) {
+  if ((held === 'hack' || held === 'overclock' || held === 'stasis') && awareness.offensiveUse) {
     return (humanSpace >= 0 && humanSpace < POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD) || random() < POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE
   }
   return false

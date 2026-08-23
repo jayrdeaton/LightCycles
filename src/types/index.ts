@@ -27,10 +27,10 @@ export type GamePhase = 'onboarding' | 'playing' | 'roundOver'
 
 export type RoundOutcome = { type: 'win'; winner: Player } | { type: 'draw' }
 
-// Overdrive/Stasis are self-targeted speed effects (2x/0x); Overclock is the same 2x speed effect
-// but opponent-targeted (see gameEngine.ts's applyActivation) — kept as its own literal (not
-// merged into Overdrive) so a boosted head can be told apart as "helping you" vs "done to you" for
-// the on-board tell and CPU reasoning, even though the multiplier is identical.
+// Overdrive is a self-targeted speed effect (2x); Overclock and Stasis are both opponent-targeted
+// (2x/0x respectively — see gameEngine.ts's applyActivation) — kept as their own literals (not
+// merged into Overdrive) so a boosted/frozen head can be told apart as "helping you" vs "done to
+// you" for the on-board tell and CPU reasoning, even where the multiplier would otherwise match.
 export type PowerupType = 'overdrive' | 'stasis' | 'shield' | 'prune' | 'hack' | 'overclock'
 
 export interface SpeedEffect {
@@ -53,9 +53,10 @@ export interface ShieldEffect {
 }
 
 // One active effect per axis — a same-axis activation replaces whatever was already there rather
-// than stacking (see applyActivation), which is what lets a self-Stasis instantly cancel an
-// incoming Overclock. Different axes coexist independently. Prune has no entry here at all — it's
-// instant/one-shot, never an ongoing effect.
+// than stacking (see applyActivation), which is what lets a landed Stasis instantly overwrite an
+// existing Overclock (or vice versa) with a fresh timer instead of the two coexisting. Different
+// axes coexist independently. Prune has no entry here at all — it's instant/one-shot, never an
+// ongoing effect.
 export interface PlayerEffects {
   speed: SpeedEffect | null
   control: ControlEffect | null

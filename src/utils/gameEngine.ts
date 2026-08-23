@@ -1,4 +1,4 @@
-import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_AMOUNT_CELLS, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
+import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_FRACTION, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { ControlEffect, Direction, GameState, GridCell, GridSize, OrientationMode, Player, PlayerEffects, PlayerState, PowerupPickup, PowerupType, RoundOutcome, ShieldEffect, SpeedEffect } from '@/types'
 
 import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell } from './grid'
@@ -100,14 +100,30 @@ function pickupId(tick: number, cell: GridCell): string {
   return `pu-${tick}-${cell.x}-${cell.y}`
 }
 
-function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, pickups: PowerupPickup[], random: () => number): GridCell | null {
-  const pickupKeys = new Set(pickups.map((pu) => cellKey(pu.cell)))
+// A pickup's full collection footprint — its own cell plus every neighbor within
+// POWERUP_COLLECT_RADIUS_CELLS — must be clear of any trail, not just its own cell, so a player
+// can actually approach it from an open direction rather than finding part of that footprint
+// boxed in behind a wall of trail. The grid edge doesn't count as blocking — a footprint spilling
+// off the board there is fine, since there's no trail to be unreachable behind.
+function hasClearCollectionArea(cell: GridCell, grid: GridSize, occupied: ReadonlySet<string>): boolean {
+  for (let dx = -POWERUP_COLLECT_RADIUS_CELLS; dx <= POWERUP_COLLECT_RADIUS_CELLS; dx++) {
+    for (let dy = -POWERUP_COLLECT_RADIUS_CELLS; dy <= POWERUP_COLLECT_RADIUS_CELLS; dy++) {
+      const neighbor = { x: cell.x + dx, y: cell.y + dy }
+      if (!isInBounds(neighbor, grid)) continue
+      if (occupied.has(cellKey(neighbor))) return false
+    }
+  }
+  return true
+}
+
+// Only ever called with an empty `pickups` (see maybeSpawnPickup's own guard), so there's no
+// "avoid the other live pickup's cell" case to account for here.
+function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, random: () => number): GridCell | null {
   const candidates: GridCell[] = []
   for (let x = 0; x < grid.cols; x++) {
     for (let y = 0; y < grid.rows; y++) {
       const cell = { x, y }
-      const key = cellKey(cell)
-      if (!occupied.has(key) && !pickupKeys.has(key)) candidates.push(cell)
+      if (hasClearCollectionArea(cell, grid, occupied)) candidates.push(cell)
     }
   }
   if (candidates.length === 0) return null
@@ -124,7 +140,7 @@ function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, pick
 function maybeSpawnPickup(grid: GridSize, tick: number, pickups: PowerupPickup[], occupied: ReadonlySet<string>, enabledPowerups: PowerupType[], random: () => number): PowerupPickup[] {
   if (enabledPowerups.length === 0) return pickups
   if (pickups.length > 0) return pickups
-  const cell = pickRandomEmptyCell(grid, occupied, pickups, random)
+  const cell = pickRandomEmptyCell(grid, occupied, random)
   if (!cell) return pickups
   const type = enabledPowerups[Math.floor(random() * enabledPowerups.length)]
   return [...pickups, { id: pickupId(tick, cell), type, cell }]
@@ -134,8 +150,8 @@ function maybeSpawnPickup(grid: GridSize, tick: number, pickups: PowerupPickup[]
 // goes through, for a human's tap or the CPU's own decision (see cpuAi.ts's applyCpuActivation).
 // Clears the activating player's single-slot inventory in every branch. Same-axis effects replace
 // rather than stack (see PlayerEffects) — assigning `effects.speed`/`.control`/`.shield` directly
-// overwrites whatever was already there with a fresh expiresAtTick, which is what lets a self-
-// Stasis instantly cancel an incoming Overclock with no special-casing.
+// overwrites whatever was already there with a fresh expiresAtTick, which is what lets, say, a
+// well-timed Overdrive shrug off an incoming Overclock's own timer with no special-casing.
 export function applyActivation(state: GameState, player: Player): GameState {
   if (state.phase !== 'playing') return state
   const p = state.players[player]
@@ -150,8 +166,10 @@ export function applyActivation(state: GameState, player: Player): GameState {
   if (type === 'prune') {
     // Neutral utility — trims BOTH trails, not just the activator's own (see the roster's own
     // reasoning: nobody's trail can hurt its owner, so a self/opponent split doesn't apply here).
-    const trail1 = trimTrailFront(state.players[1].trail, POWERUP_PRUNE_AMOUNT_CELLS)
-    const trail2 = trimTrailFront(state.players[2].trail, POWERUP_PRUNE_AMOUNT_CELLS)
+    // Proportional to each trail's own current length (not a fixed cell count) so it stays a
+    // meaningful "oh shit" panic button no matter how long the round has run.
+    const trail1 = trimTrailFront(state.players[1].trail, Math.floor(state.players[1].trail.length * POWERUP_PRUNE_FRACTION))
+    const trail2 = trimTrailFront(state.players[2].trail, Math.floor(state.players[2].trail.length * POWERUP_PRUNE_FRACTION))
     return {
       ...state,
       players: {
@@ -161,10 +179,17 @@ export function applyActivation(state: GameState, player: Player): GameState {
     }
   }
 
-  if (type === 'overdrive' || type === 'stasis') {
-    const multiplier = type === 'overdrive' ? 2 : 0
-    const speed: SpeedEffect = { type, multiplier, expiresAtTick: tick + POWERUP_EFFECT_DURATION_TICKS[type] }
+  if (type === 'overdrive') {
+    const speed: SpeedEffect = { type: 'overdrive', multiplier: 2, expiresAtTick: tick + POWERUP_EFFECT_DURATION_TICKS.overdrive }
     return { ...state, players: { ...state.players, [player]: { ...p, heldPowerup: null, effects: { ...p.effects, speed } } } }
+  }
+
+  if (type === 'stasis') {
+    // Offensive, like Hack/Overclock below — freezing yourself is a punishment, not a boon, so
+    // Stasis (unlike Overdrive) always targets the opponent: pin them in place for the duration so
+    // the activator can box them into a trap.
+    const speed: SpeedEffect = { type: 'stasis', multiplier: 0, expiresAtTick: tick + POWERUP_EFFECT_DURATION_TICKS.stasis }
+    return { ...state, players: { ...state.players, [player]: { ...p, heldPowerup: null }, [opponent]: { ...opp, effects: { ...opp.effects, speed } } } }
   }
 
   if (type === 'shield') {
