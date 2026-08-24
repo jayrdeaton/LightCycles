@@ -1,6 +1,6 @@
-import { Direction, OrientationMode, Player } from '@/types'
+import { resolveSwipeDirection } from '@tastic/input'
 
-import { isOppositeDirection } from './grid'
+import { Direction, OrientationMode, Player } from '@/types'
 
 // Below this drag distance (px), a gesture release is treated as a tap/jitter rather than a
 // deliberate flick-to-turn.
@@ -14,47 +14,6 @@ export const MIN_SWIPE_DISTANCE = 24
 // directly rather than re-deriving "was this a tap" from swipe-direction bookkeeping — that
 // approach occasionally left a genuine, slightly-wobbly tap unrecognized.
 export const TAP_MAX_DISTANCE = 18
-
-// Compares the magnitude of each axis of a translation vector to pick its dominant axis, then the
-// sign of that axis for direction. Returns null for a drag too short to count as an intentional
-// swipe. The vector doesn't have to span a whole gesture end-to-end — TouchInputLayer feeds this
-// per-segment deltas within one continuous touch (see its own comment) so a player can chain
-// several turns without lifting their finger, resetting the baseline after each recognized swipe.
-// Marked 'worklet' so it can run on the UI thread inside a Pan gesture's onUpdate, not just at
-// gesture end.
-export function resolveSwipeDirection(translationX: number, translationY: number): Direction | null {
-  'worklet'
-  if (Math.abs(translationX) < MIN_SWIPE_DISTANCE && Math.abs(translationY) < MIN_SWIPE_DISTANCE) return null
-
-  if (Math.abs(translationX) > Math.abs(translationY)) {
-    return translationX > 0 ? 'right' : 'left'
-  }
-  return translationY > 0 ? 'down' : 'up'
-}
-
-// Hack's steering inversion, applied here in the raw screen frame — the same frame every input
-// source already resolves swipes/keys in, and the same frame the game engine moves the cycle in
-// (see resolveTurnIntent's own comment on why no per-orientation flip is needed). Flips every axis
-// (reuses flipDirection), not just left/right, so a Hack'd player loses control of both steering
-// axes, not just one. Every input source (native touch, web pointer, web keyboard) and the CPU's
-// own decision path (see cpuAi.ts's applyCpuTurn) call this identically at their own single
-// JS-thread chokepoint, rather than duplicating an if/else per call site.
-export function applyControlInversion(direction: Direction, inverted: boolean): Direction {
-  return inverted ? flipDirection(direction) : direction
-}
-
-export function flipDirection(direction: Direction): Direction {
-  switch (direction) {
-    case 'up':
-      return 'down'
-    case 'down':
-      return 'up'
-    case 'left':
-      return 'right'
-    case 'right':
-      return 'left'
-  }
-}
 
 export interface ResolveTurnIntentParams {
   player: Player
@@ -88,14 +47,5 @@ export interface ResolveTurnIntentParams {
 // they don't affect the result.
 export function resolveTurnIntent({ translationX, translationY }: ResolveTurnIntentParams): Direction | null {
   'worklet'
-  return resolveSwipeDirection(translationX, translationY)
-}
-
-// Whether a resolved swipe/key direction would actually turn a player heading `currentDirection` —
-// mirrors applyTurnIntent's own no-op checks in gameEngine.ts (already heading that way, or a 180°
-// reversal into the player's own trail) so input layers can gate turn feedback (sound/haptic) on a
-// swipe that will actually do something, rather than firing it for every recognized direction and
-// letting the engine silently no-op the ones that don't turn the player.
-export function isEffectiveTurn(direction: Direction, currentDirection: Direction): boolean {
-  return direction !== currentDirection && !isOppositeDirection(direction, currentDirection)
+  return resolveSwipeDirection({ x: translationX, y: translationY }, MIN_SWIPE_DISTANCE)
 }

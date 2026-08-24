@@ -1,10 +1,11 @@
+import { applyControlInversion } from '@tastic/input'
+
 import { CPU_EASY_RANDOM_CHANCE, CPU_FLOOD_FILL_CAP, CPU_HACK_COMPENSATION_CHANCE, CPU_NORMAL_SUBOPTIMAL_CHANCE, CPU_POWERUP_AWARENESS, POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE, POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD, POWERUP_CPU_OVERDRIVE_MIN_SPACE, POWERUP_CPU_PRUNE_SPACE_THRESHOLD } from '@/constants/game'
 import { CpuDifficulty, Direction, GameState, GridCell, GridSize, Player, PlayerState, PowerupPickup, PowerupType } from '@/types'
 
 import { countReachableCells, distanceToNearestTarget } from './floodFill'
 import { applyActivation, applyTurnIntent, buildOccupiedSet, stepsFor } from './gameEngine'
 import { ALL_DIRECTIONS, cellKey, isInBounds, isOppositeDirection, stepCell } from './grid'
-import { applyControlInversion } from './turnIntent'
 
 // The CPU always plays player 2 — see index.tsx/game.tsx, which fix the human at player 1 (and
 // suppress the face-to-face flip entirely) whenever gameMode is 'vsCpu'.

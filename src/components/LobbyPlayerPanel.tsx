@@ -1,10 +1,10 @@
 import { SeedColor } from '@rific/auto-paper'
+import { useIsTouchPrimaryDevice } from '@tastic/core'
 import { InlineColorPicker, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 
 import { MONO_FONT } from '@/constants/fonts'
-import { useIsTouchPrimaryDevice } from '@/hooks/useIsTouchPrimaryDevice'
 import { KeyScheme } from '@/types'
 
 const KEY_SCHEME_OPTIONS: { value: KeyScheme; label: string }[] = [

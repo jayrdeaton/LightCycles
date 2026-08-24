@@ -136,6 +136,7 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
+  const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
 
@@ -212,22 +213,37 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
         </View>
       )}
 
-      {/* Left corner — opposite the settings cog below, which claims the top-right in every phase
-      that shows it. Sits over the dark backdrop when either dialog is up (a fixed light tint, since
-      that backdrop is always dark regardless of theme) and over the bare board when peeked
-      (theme-aware fg, matching every other icon that sits directly on the board). */}
-      {state.phase === 'roundOver' && showResultDialog && <IconButton icon={resultPeeked ? 'eye-off-outline' : 'eye-outline'} iconColor={resultPeeked ? fg : 'rgba(255,255,255,0.9)'} size={22} style={styles.peekButton} onPress={() => setResultPeeked((peeked) => !peeked)} accessibilityLabel={resultPeeked ? 'Show results' : 'Peek at board'} />}
+      {/* Left slot, vertically centered on the board rather than pinned to the top corner —
+      opposite the settings cog below, which claims the same centered slot on the right in every
+      phase that shows it. In faceToFace mode a top corner sits inside P2's (rotated) near zone,
+      so P1 had to reach across the whole board for it; centering on the edge is equidistant for
+      both, same fix as BoxHockey's own corner buttons. Filled circular chip (bg/fg, not swapped
+      the way BoxHockey's are — there's no wall here to blend into, just a solid theme-colored
+      plate for contrast) rather than a bare icon, since a bare icon reads fine over empty board
+      but disappears against the grid lines and zone markers. The opaque chip is also why iconColor
+      no longer needs to swap to a fixed light tint when the dialog backdrop is up behind it (the
+      old behavior, now removed) — the chip's own background provides the contrast regardless of
+      what's underneath. */}
+      {state.phase === 'roundOver' && showResultDialog && (
+        <View style={styles.leftSlot}>
+          <IconButton icon={resultPeeked ? 'eye-off-outline' : 'eye-outline'} iconColor={fg} containerColor={bg} style={styles.chipButton} size={22} onPress={() => setResultPeeked((peeked) => !peeked)} accessibilityLabel={resultPeeked ? 'Show results' : 'Peek at board'} />
+        </View>
+      )}
 
-      {/* Full-strength theme-aware fg over the bare board, same as every other screen's own
-      back/settings corner chrome (index.tsx, lobby.tsx, achievements.tsx) — recolors to the fixed
-      light tint the moment the quit confirmation's own backdrop goes up over it, same as the cog
-      below. */}
-      {state.phase === 'onboarding' && <IconButton icon='arrow-left' iconColor={confirmBackVisible ? 'rgba(255,255,255,0.9)' : fg} size={22} style={styles.backButton} onPress={onBackPress} />}
-      {/* Same top-right slot as every other screen's cog (index.tsx, lobby.tsx) — reachable during
+      {/* Same chip treatment as the peek button above, which shares this exact slot. */}
+      {state.phase === 'onboarding' && (
+        <View style={styles.leftSlot}>
+          <IconButton icon='arrow-left' iconColor={fg} containerColor={bg} style={styles.chipButton} size={22} onPress={onBackPress} />
+        </View>
+      )}
+      {/* Same centered right-edge slot and chip treatment as the left one above — reachable during
       the countdown, again once the round-over dialog is up, and again over the quit confirmation,
-      so it's always in the same place regardless of which overlay is on screen. Recolors the same
-      way the peek button (above) does whenever it's sitting over one of those dark backdrops. */}
-      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && <IconButton icon='cog' iconColor={(state.phase === 'roundOver' && !resultPeeked) || confirmBackVisible ? 'rgba(255,255,255,0.9)' : fg} size={22} style={styles.settingsButton} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />}
+      so it's always in the same place regardless of which overlay is on screen. */}
+      {(state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog)) && (
+        <View style={styles.rightSlot}>
+          <IconButton icon='cog' iconColor={fg} containerColor={bg} style={styles.chipButton} size={22} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+        </View>
+      )}
 
       <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} settings={userSettings} setSettings={setUserSettings} />
     </>
@@ -331,8 +347,17 @@ export default function GameScreen() {
 }
 
 const styles = StyleSheet.create({
-  backButton: { left: 4, position: 'absolute', top: 4 },
   boardArea: { overflow: 'hidden', position: 'absolute' },
+  // Cancels IconButton's own built-in 6px margin (react-native-paper's default Surface spacing),
+  // same reasoning as BoxHockey's identical chipButton style — otherwise a visible gap opens up
+  // between the solid chip and its slot now that there's a background to see the edge of.
+  chipButton: { margin: 0 },
+  // top: 0 + bottom: 0 + justifyContent: 'center' centers the button on the board's vertical
+  // midline regardless of its height, instead of pinning it a fixed distance from the top the way
+  // the old corner slots did. A bare View here doesn't claim any touch of its own, so it can span
+  // the full board height without stealing swipes from TouchInputLayer underneath — only the
+  // IconButton it wraps is actually touchable.
+  leftSlot: { bottom: 0, justifyContent: 'center', left: 4, position: 'absolute', top: 0 },
   overlay: {
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.72)',
@@ -355,7 +380,6 @@ const styles = StyleSheet.create({
   // on top of, reading as extra room below the title specifically (most visible once the pip row
   // sits right after it, next to a button with no such slack) — this claws it back.
   overlayTitle: { fontWeight: 'bold', marginBottom: -8 },
-  peekButton: { left: 4, position: 'absolute', top: 4 },
   reorientingText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
   reorientingZone: {
     alignItems: 'center',
@@ -366,6 +390,6 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  root: { flex: 1 },
-  settingsButton: { position: 'absolute', right: 4, top: 4 }
+  rightSlot: { bottom: 0, justifyContent: 'center', position: 'absolute', right: 4, top: 0 },
+  root: { flex: 1 }
 })

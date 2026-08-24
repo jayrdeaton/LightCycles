@@ -1,9 +1,10 @@
 import { useVibration } from '@rific/feedback-press'
+import { applyControlInversion, isEffectiveTurn, isTap, KEY_SCHEMES, resolveKeyDirection } from '@tastic/input'
 import { useEffect, useMemo } from 'react'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
-import { applyControlInversion, isEffectiveTurn, resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
+import { resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
   orientationMode: OrientationMode
@@ -26,15 +27,12 @@ export interface TouchInputLayerProps {
 
 // One physical-key set per scheme (see the lobby's keyboard-scheme picker) — player 1 and player 2
 // can independently pick any scheme, so the actual key -> player map below is built per-mount
-// rather than hardcoded to one fixed WASD/Arrows split. `activate` is a 4th, adjacency-based
-// binding per scheme (thumb-reachable from wasd, centrally reachable from arrows, adjacent to
-// ijkl's own cluster) — distinct across all three so two local players sharing one keyboard never
+// rather than hardcoded to one fixed WASD/Arrows split. Movement keys come from @tastic/input's
+// KEY_SCHEMES; `activate` is a 4th, adjacency-based binding per scheme (thumb-reachable from wasd,
+// centrally reachable from arrows, adjacent to ijkl's own cluster) that KEY_SCHEMES doesn't cover,
+// kept local here — distinct across all three so two local players sharing one keyboard never
 // collide, even if both happen to pick the same scheme.
-const KEY_SCHEME_KEYS: Record<KeyScheme, { up: string; down: string; left: string; right: string; activate: string }> = {
-  wasd: { up: 'w', down: 's', left: 'a', right: 'd', activate: 'q' },
-  arrows: { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', activate: ' ' },
-  ijkl: { up: 'i', down: 'k', left: 'j', right: 'l', activate: 'u' }
-}
+const ACTIVATE_KEYS: Record<KeyScheme, string> = { wasd: 'q', arrows: ' ', ijkl: 'u' }
 
 interface TrackedPointer {
   player: Player
@@ -52,26 +50,12 @@ interface TrackedPointer {
 }
 
 export default function TouchInputLayer({ orientationMode, humanPlayers, enabled, onTurn, onActivate, controlInverted, keyScheme, currentDirections }: TouchInputLayerProps) {
-  // Synthetic translation vectors, one per key, fed through the same resolveTurnIntent() every
-  // other input source uses (see TouchInputLayer.tsx) rather than a separate key -> Direction
-  // table — one axis/direction mapping to get right and keep tested, not two.
-  const keyMap = useMemo(() => {
-    const map: Record<string, { player: Player; translationX: number; translationY: number }> = {}
-    for (const player of [1, 2] as Player[]) {
-      const keys = KEY_SCHEME_KEYS[keyScheme[player]]
-      map[keys.up] = { player, translationX: 0, translationY: -100 }
-      map[keys.down] = { player, translationX: 0, translationY: 100 }
-      map[keys.left] = { player, translationX: -100, translationY: 0 }
-      map[keys.right] = { player, translationX: 100, translationY: 0 }
-    }
-    return map
-  }, [keyScheme])
-
-  // A separate, single-purpose map (rather than folding into keyMap above) since an activate key
-  // has no translation vector of its own — it maps straight to a player, not a direction.
+  // A single-purpose map from activate key -> player, since an activate key has no Direction of
+  // its own (see ACTIVATE_KEYS above; movement keys are matched directly against KEY_SCHEMES via
+  // resolveKeyDirection in handleKeyDown below, so no analogous map is needed for those).
   const activateKeyMap = useMemo(() => {
     const map: Record<string, Player> = {}
-    for (const player of [1, 2] as Player[]) map[KEY_SCHEME_KEYS[keyScheme[player]].activate] = player
+    for (const player of [1, 2] as Player[]) map[ACTIVATE_KEYS[keyScheme[player]]] = player
     return map
   }, [keyScheme])
 
@@ -93,23 +77,23 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
         return
       }
 
-      const mapped = keyMap[key]
-      if (!mapped || !humanPlayers.includes(mapped.player)) return
-      e.preventDefault()
-      const direction = resolveTurnIntent({ player: mapped.player, translationX: mapped.translationX, translationY: mapped.translationY, orientationMode })
-      if (direction) {
-        const invertedDirection = applyControlInversion(direction, controlInverted[mapped.player])
-        onTurn(mapped.player, invertedDirection)
-        if (isEffectiveTurn(invertedDirection, currentDirections[mapped.player])) {
+      for (const player of humanPlayers) {
+        const direction = resolveKeyDirection(key, KEY_SCHEMES[keyScheme[player]])
+        if (!direction) continue
+        e.preventDefault()
+        const invertedDirection = applyControlInversion(direction, controlInverted[player])
+        onTurn(player, invertedDirection)
+        if (isEffectiveTurn(invertedDirection, currentDirections[player])) {
           playTurn()
           selection()
         }
+        return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, currentDirections, keyMap, activateKeyMap, orientationMode, playTurn, playActivate, selection])
+  }, [enabled, humanPlayers, onTurn, onActivate, controlInverted, currentDirections, keyScheme, activateKeyMap, playTurn, playActivate, selection])
 
   // Swipe input, mirroring TouchInputLayer.tsx's Pan gestures but via raw window pointer events —
   // react-native-gesture-handler has no bearing here (RNGH ships no web target this app pulls in),
@@ -183,7 +167,7 @@ export default function TouchInputLayer({ orientationMode, humanPlayers, enabled
     // genuine but slightly wobbly tap unrecognized. Mirrors the native file's own Gesture.Tap.
     const handlePointerUp = (e: PointerEvent) => {
       const tracked = pointers.get(e.pointerId)
-      if (tracked && Math.hypot(e.clientX - tracked.downX, e.clientY - tracked.downY) <= TAP_MAX_DISTANCE) {
+      if (tracked && isTap(Math.hypot(e.clientX - tracked.downX, e.clientY - tracked.downY), TAP_MAX_DISTANCE)) {
         onActivate(tracked.player)
         playActivate()
         selection()

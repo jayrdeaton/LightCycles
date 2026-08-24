@@ -71,7 +71,8 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "./plugins/withDeferBottomEdgeGestures"
     ],
     "extra": {
       "router": {},
