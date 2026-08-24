@@ -42,7 +42,7 @@
     "@rific/splash-gate": "^0.2.0",
     "@rific/updater": "^0.4.0",
     "@shopify/react-native-skia": "2.6.2",
-    "@tastic/hud": "^0.1.1",
+    "@tastic/hud": "^0.1.2",
     "@tastic/split-screen": "^0.1.1",
     "expo": "^57.0.15",
     "expo-asset": "~57.0.13",
