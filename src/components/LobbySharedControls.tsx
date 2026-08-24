@@ -1,37 +1,7 @@
+import { MenuOption, PopoverHost, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { StyleSheet, View } from 'react-native'
 
-import { IconDropdown } from '@/components/IconDropdown'
-import { PowerupPicker, PowerupPickerOption } from '@/components/PowerupPicker'
-import { PopoverHost, usePopoverHost } from '@/hooks/usePopoverHost'
-import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailGrowthTier } from '@/types'
-
-interface GridSizeOption {
-  value: GridSizeTier
-  label: string
-  icon: string
-  iconSize?: number
-}
-
-interface SpeedOption {
-  value: SpeedTier
-  label: string
-  icon: string
-}
-
-interface CpuDifficultyOption {
-  value: CpuDifficulty
-  label: string
-  icon: string
-}
-
-interface TrailGrowthOption {
-  value: TrailGrowthTier
-  label: string
-  // Only 'static' sets this — it's the one option where knowing "this is the original behavior"
-  // is actually useful context, unlike fast/slow which are self-explanatory enough to try blind.
-  description?: string
-  icon: string
-}
+import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailSpeedTier } from '@/types'
 
 interface Props {
   // Shared popover host — see LobbyPlayerPanel's identical `host` prop. Passed in vs-CPU mode so
@@ -40,26 +10,30 @@ interface Props {
   // every picker just adds clutter). Omit to fall back to this component's own independent host.
   host?: PopoverHost
   gridSizeTier: GridSizeTier
-  gridSizeOptions: GridSizeOption[]
+  gridSizeOptions: MenuOption<GridSizeTier>[]
   onGridSizeChange: (value: GridSizeTier) => void
   speedTier: SpeedTier
-  speedOptions: SpeedOption[]
+  speedOptions: MenuOption<SpeedTier>[]
   onSpeedChange: (value: SpeedTier) => void
-  trailGrowthTier: TrailGrowthTier
-  trailGrowthOptions: TrailGrowthOption[]
-  onTrailGrowthChange: (value: TrailGrowthTier) => void
+  trailSpeedTier: TrailSpeedTier
+  trailSpeedOptions: MenuOption<TrailSpeedTier>[]
+  onTrailSpeedChange: (value: TrailSpeedTier) => void
   // Which powerup types can spawn this round — "off" is simply an empty array (see GameSettings'
   // own comment), so this one multi-select control covers both at once rather than needing a
   // separate on/off toggle alongside it.
   enabledPowerups: PowerupType[]
-  powerupOptions: PowerupPickerOption[]
+  powerupOptions: MenuOption<PowerupType>[]
   onPowerupsChange: (value: PowerupType[]) => void
   // Omitted entirely for two-player — there's no CPU to tune the difficulty of.
   cpuDifficulty?: CpuDifficulty
-  cpuDifficultyOptions?: CpuDifficultyOption[]
+  cpuDifficultyOptions?: MenuOption<CpuDifficulty>[]
   onCpuDifficultyChange?: (value: CpuDifficulty) => void
   accentColor: string
   mutedColor: string
+  // Foreground for a selected row's icon/text — see SectionedDropdown's identical prop. This layer
+  // always has a real theme onTertiary to hand over (accentColor is themeColors.tertiary), so it's
+  // required here rather than left to SectionedDropdown's own per-player-color fallback.
+  onAccentColor: string
   dark: boolean
 }
 
@@ -69,9 +43,9 @@ interface Props {
 // `host` is passed in to share with the player panels instead (vs-CPU mode).
 // This component's own popover ids — used to check membership below, not just "is anything open on
 // the host", since a shared host (vs-CPU) also carries the player panels' own popover ids.
-const OWN_IDS = ['gridSize', 'speed', 'trailGrowth', 'powerups', 'cpuDifficulty']
+const OWN_IDS = ['gridSize', 'speed', 'trailSpeed', 'powerups', 'cpuDifficulty']
 
-export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOptions, onGridSizeChange, speedTier, speedOptions, onSpeedChange, trailGrowthTier, trailGrowthOptions, onTrailGrowthChange, enabledPowerups, powerupOptions, onPowerupsChange, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange, accentColor, mutedColor, dark }: Props) {
+export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOptions, onGridSizeChange, speedTier, speedOptions, onSpeedChange, trailSpeedTier, trailSpeedOptions, onTrailSpeedChange, enabledPowerups, powerupOptions, onPowerupsChange, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange, accentColor, mutedColor, onAccentColor, dark }: Props) {
   const ownHost = usePopoverHost()
   const host = sharedHost ?? ownHost
   // See LobbyPlayerPanel's identical ownPopoverOpen comment — elevating this row for *any* open
@@ -81,19 +55,19 @@ export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOp
 
   return (
     <View style={[styles.row, ownPopoverOpen && styles.rowOpen]}>
-      <IconDropdown id='gridSize' host={host} icon='grid' accessibilityLabel='Grid size' options={gridSizeOptions} value={gridSizeTier} onChange={onGridSizeChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
+      <SectionedDropdown id='gridSize' host={host} icon='grid' accessibilityLabel='Grid size' sections={[{ kind: 'single', id: 'gridSize', options: gridSizeOptions, value: gridSizeTier, onChange: onGridSizeChange }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />
 
-      <IconDropdown id='speed' host={host} icon='speedometer' accessibilityLabel='Speed' options={speedOptions} value={speedTier} onChange={onSpeedChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
+      <SectionedDropdown id='speed' host={host} icon='speedometer' accessibilityLabel='Speed' sections={[{ kind: 'single', id: 'speed', options: speedOptions, value: speedTier, onChange: onSpeedChange }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />
 
       {/* Speed ramp toggle hidden for now — settings.speedRampEnabled stays wired through
       gameEngine/validation/useGameState and defaults to false, so this is a pure UI hide, not a
       feature removal. Re-add the toggle here (and its props above) to bring it back. */}
 
-      <IconDropdown id='trailGrowth' host={host} icon='chart-line' accessibilityLabel='Trail growth' options={trailGrowthOptions} value={trailGrowthTier} onChange={onTrailGrowthChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
+      <SectionedDropdown id='trailSpeed' host={host} icon='chart-line' accessibilityLabel='Trail speed' sections={[{ kind: 'single', id: 'trailSpeed', options: trailSpeedOptions, value: trailSpeedTier, onChange: onTrailSpeedChange }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />
 
-      <PowerupPicker id='powerups' host={host} options={powerupOptions} value={enabledPowerups} onChange={onPowerupsChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />
+      <SectionedDropdown id='powerups' host={host} icon='flash' accessibilityLabel={`Powerups ${enabledPowerups.length > 0 ? 'on' : 'off'}`} sections={[{ kind: 'multi', id: 'powerups', options: powerupOptions, value: enabledPowerups, onChange: onPowerupsChange, allClear: true }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />
 
-      {cpuDifficulty && cpuDifficultyOptions && onCpuDifficultyChange && <IconDropdown id='cpuDifficulty' host={host} icon='chip' accessibilityLabel='CPU difficulty' options={cpuDifficultyOptions} value={cpuDifficulty} onChange={onCpuDifficultyChange} accentColor={accentColor} mutedColor={mutedColor} dark={dark} />}
+      {cpuDifficulty && cpuDifficultyOptions && onCpuDifficultyChange && <SectionedDropdown id='cpuDifficulty' host={host} icon='chip' accessibilityLabel='CPU difficulty' sections={[{ kind: 'single', id: 'cpuDifficulty', options: cpuDifficultyOptions, value: cpuDifficulty, onChange: onCpuDifficultyChange }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />}
     </View>
   )
 }
@@ -102,10 +76,19 @@ const styles = StyleSheet.create({
   row: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
+    // Safety net against a narrow device: a row of fixed-size triggers with no wrap just runs off
+    // the screen edge with nothing to catch it, taking the last trigger or two with it —
+    // untappable, not just clipped. Wrap turns that into "drops to a second centered line" instead.
+    // See BoxHockey's LoadoutSharedControls (its own row style) for the sibling fix and the actual
+    // measurement that prompted it.
+    flexWrap: 'wrap',
+    // Wider than a plain icon row would need, to give each trigger's TriggerGauge arc — pulled in
+    // close around the icon itself (see TriggerGauge's own ARC_GAP) — room to breathe against its
+    // neighbors instead of the two arcs crowding each other.
+    gap: 20,
     justifyContent: 'center'
   },
-  // See IconDropdown's anchorOpen comment — this row is itself a sibling of the player panels in
+  // See SectionedDropdown's anchorOpen comment — this row is itself a sibling of the player panels in
   // lobby.tsx, and React Native Web's per-view stacking contexts mean a popover escaping this row's
   // bounds needs the row itself elevated, not just the popover content, to paint above a later
   // sibling panel.

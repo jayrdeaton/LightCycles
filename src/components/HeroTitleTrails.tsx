@@ -180,7 +180,7 @@ export function HeroTitleTrails({ lightBox, cyclesBox, p1Color, p2Color, active,
     const baseTrailLengthPx = TRAIL_LENGTH_FRACTION * Math.min(lightPerimeter, cyclesPerimeter)
     return {
       lightTrailLengthPx: baseTrailLengthPx,
-      cyclesTrailLengthPx: baseTrailLengthPx * (1 + CYCLES_TRAIL_LENGTH_BONUS_FRACTION),
+      cyclesTrailLengthPx: baseTrailLengthPx * (1 + CYCLES_TRAIL_LENGTH_BONUS_FRACTION)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightBox.width, lightBox.height, cyclesBox.width, cyclesBox.height])

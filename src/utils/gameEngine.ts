@@ -72,7 +72,7 @@ function shouldTrimTrailAt(tick: number, growthRate: number): boolean {
 }
 
 // Slices `count` cells off the front (oldest end), clamped so the head is never removed — shared
-// by the periodic trailGrowthTier trim above, Prune's instant multi-cell application (see
+// by the periodic trailSpeedTier trim above, Prune's instant multi-cell application (see
 // applyActivation), and Shield's break-through trim (see trimTrailAtCell) below.
 function trimTrailFront(trail: GridCell[], count: number): GridCell[] {
   const maxRemovable = trail.length - 1
@@ -233,12 +233,12 @@ export function stepsFor(effects: PlayerEffects): number {
 // `occupied` defaults to a fresh build from `state.players` (correct for every existing call
 // site/test), but a caller that's already built one from this same state can pass it in to skip
 // rebuilding it a second time on the same tick (see useGameState.ts, which also feeds
-// applyCpuTurn/applyCpuActivation from it). `trailGrowthRate` defaults to 1 (the original
+// applyCpuTurn/applyCpuActivation from it). `trailSpeedRate` defaults to 1 (the original
 // behavior). `enabledPowerups`/`random` default to []/Math.random so every existing call site and
 // test — which never pass them — sees byte-identical behavior to before powerups existed. An empty
 // `enabledPowerups` is what "powerups off" actually means (see GameSettings' own comment) — there's
 // no separate boolean gate.
-export function tickGame(state: GameState, occupied: ReadonlySet<string> = buildOccupiedSet(state.players), trailGrowthRate: number = 1, enabledPowerups: PowerupType[] = [], random: () => number = Math.random): GameState {
+export function tickGame(state: GameState, occupied: ReadonlySet<string> = buildOccupiedSet(state.players), trailSpeedRate: number = 1, enabledPowerups: PowerupType[] = [], random: () => number = Math.random): GameState {
   if (state.phase !== 'playing') return state
 
   const { grid } = state
@@ -394,11 +394,11 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
     }
   }
 
-  // Periodic trailGrowthTier trim — gated per-player on whether that player actually moved this
+  // Periodic trailSpeedTier trim — gated per-player on whether that player actually moved this
   // tick (a Stasis'd, 0-step player's trail is fully frozen: no append, no trim, for the duration)
-  // and on having grown past MIN_TRAIL_LENGTH_BEFORE_TRIM — every tier just grows like 'static'
+  // and on having grown past MIN_TRAIL_LENGTH_BEFORE_TRIM — every tier just grows like 'off'
   // until then, so a round doesn't start trimming a trail that's barely begun.
-  const trimDue = shouldTrimTrailAt(tick, trailGrowthRate)
+  const trimDue = shouldTrimTrailAt(tick, trailSpeedRate)
   if (trimDue && steps1 > 0 && trail1.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail1 = trimTrailFront(trail1, 1)
   if (trimDue && steps2 > 0 && trail2.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail2 = trimTrailFront(trail2, 1)
 

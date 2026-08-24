@@ -19,18 +19,18 @@ export interface GameBoardProps {
   // TouchInputLayer.tsx's identical prop.
   p1OnRight: boolean
   // Ticks elapsed this round — see GameState's own comment. Drives PlayerTrail's head-glide
-  // retrigger instead of trail.length, which a laggy trailGrowthTier can leave unchanged on a tick
+  // retrigger instead of trail.length, which a laggy trailSpeedTier can leave unchanged on a tick
   // that both grows and trims the trail.
   tick: number
   pickups: PowerupPickup[]
   // The app theme's tertiary color — pickups render in this, distinct from either player's own
   // primary/secondary trail color, so a glyph never gets mistaken for either player's own head.
   pickupColor: string
-  // The resolved TRAIL_GROWTH_RATE number for the active trailGrowthTier (see constants/game.ts) —
+  // The resolved TRAIL_SPEED_RATE number for the active trailSpeedTier (see constants/game.ts) —
   // lets PlayerTrail interpolate the tail's position continuously between trims instead of holding
   // still and then snapping a whole cell forward. Passed as the raw rate, not the tier, so this
   // component stays as decoupled from the tier enum as gameEngine.ts's own tickGame already is.
-  trailGrowthRate: number
+  trailSpeedRate: number
 }
 
 function cellCenter(cell: GridCell, cellPx: number) {
@@ -191,7 +191,7 @@ function trailPath(trail: PlayerState['trail'], cellPx: number) {
   return path
 }
 
-function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthRate }: { player: PlayerState; phase: GamePhase; tickIntervalMs: number; cellPx: number; tick: number; trailGrowthRate: number }) {
+function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRate }: { player: PlayerState; phase: GamePhase; tickIntervalMs: number; cellPx: number; tick: number; trailSpeedRate: number }) {
   // Nearly fill their own cell on purpose — combined with a small cellPx (see constants/game.ts's
   // GRID_CELL_PX), this makes the actual hit-detection boundary obvious at a glance: a trail or head
   // reads as occupying essentially the whole cell it's in, so a one-cell gap between two trails
@@ -211,7 +211,7 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   // Continuously interpolated toward nextCenter (see tailProgress) rather than snapping straight to
   // `tail` — the fractional creep between trims, not just the trims themselves, is what needs to
   // animate for the tail to read as *following* rather than holding still and then hopping.
-  const progress = tailProgress(tick, trailGrowthRate, trail.length)
+  const progress = tailProgress(tick, trailSpeedRate, trail.length)
   const tailTarget = { x: tail.x + (nextCenter.x - tail.x) * progress, y: tail.y + (nextCenter.y - tail.y) * progress }
 
   // The game state advances in discrete grid steps (see gameEngine.ts) — snapping straight to
@@ -219,7 +219,7 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   // refresh rate. Animating the head (and the trail's last segment, which follows it) smoothly
   // between cells over the tick's own duration decouples how it looks from how often the
   // simulation actually steps, without touching the underlying grid logic at all. The tail end
-  // gets the identical treatment below it: under a laggy trailGrowthTier (see gameEngine.ts's
+  // gets the identical treatment below it: under a laggy trailSpeedTier (see gameEngine.ts's
   // shouldTrimTrailAt) it also advances, and snapping it forward a whole cell on every trim tick
   // read exactly as janky as the head snapping did before this glide existed.
   const animX = useSharedValue(head.x)
@@ -299,7 +299,7 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
     tailAnimY.value = withTiming(tailTarget.y, { duration, easing: Easing.linear })
     // Only an actual new tick should retrigger this — tickIntervalMs changing mid-glide (speed
     // ramp) should finish the current glide at its original pace, not restart it. Keyed on `tick`
-    // rather than trail.length: under a laggy trailGrowthTier, a tick that both appends and trims
+    // rather than trail.length: under a laggy trailSpeedTier, a tick that both appends and trims
     // the trail leaves its length unchanged, which would otherwise silently skip the glide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick])
@@ -503,14 +503,14 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailGrowthR
   )
 }
 
-export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, pickupColor, trailGrowthRate }: GameBoardProps) {
+export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, pickupColor, trailSpeedRate }: GameBoardProps) {
   return (
     <View style={styles.container}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Walls grid={grid} cellPx={cellPx} orientationMode={orientationMode} p1OnRight={p1OnRight} players={players} phase={phase} />
         <Powerups pickups={pickups} cellPx={cellPx} color={pickupColor} />
-        <PlayerTrail player={players[1]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailGrowthRate={trailGrowthRate} />
-        <PlayerTrail player={players[2]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailGrowthRate={trailGrowthRate} />
+        <PlayerTrail player={players[1]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} />
+        <PlayerTrail player={players[2]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} />
       </Canvas>
     </View>
   )

@@ -19,7 +19,7 @@ function installFakeRaf() {
   }
 }
 
-const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailGrowthTier: 'static', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [] }
+const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailSpeedTier: 'off', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [] }
 const CPU_SETTINGS: GameSettings = { ...SETTINGS, gameMode: 'vsCpu', cpuDifficulty: 'hard' }
 const COLORS = { 1: '#3B82F6', 2: '#EF4444' }
 const ORIENTATION = 'faceToFace'
@@ -63,13 +63,13 @@ describe('useGameState', () => {
     expect(result.current.state.players[2].trail.length).toBeGreaterThan(1)
   })
 
-  it('keeps a laggy trailGrowthTier shorter than the classic tier over the same run', async () => {
+  it('keeps a laggy trailSpeedTier shorter than the classic tier over the same run', async () => {
     // A much bigger board than the other tests here use — this one needs enough runway that
     // neither player reaches a wall (ending the round) before there's been time to both clear
     // MIN_TRAIL_LENGTH_BEFORE_TRIM's grace period (gameEngine.ts — below that length every tier
-    // just grows like 'static') and show a real difference afterward.
+    // just grows like 'off') and show a real difference afterward.
     const { result: classic } = await renderHook(() => useGameState(2000, 2000, SETTINGS, COLORS, ORIENTATION, P1_ON_RIGHT))
-    const { result: fast } = await renderHook(() => useGameState(2000, 2000, { ...SETTINGS, trailGrowthTier: 'fast' }, COLORS, ORIENTATION, P1_ON_RIGHT))
+    const { result: fast } = await renderHook(() => useGameState(2000, 2000, { ...SETTINGS, trailSpeedTier: 'fast' }, COLORS, ORIENTATION, P1_ON_RIGHT))
 
     await act(async () => {
       classic.current.beginPlaying()

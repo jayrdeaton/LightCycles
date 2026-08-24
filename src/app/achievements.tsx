@@ -1,11 +1,11 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
+import { useOrientationLock } from '@tastic/split-screen'
 import { StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MONO_FONT } from '@/constants/fonts'
-import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { safeBack } from '@/utils/navigation'
 
 export default function AchievementsScreen() {

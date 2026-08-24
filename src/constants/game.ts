@@ -1,4 +1,4 @@
-import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailGrowthTier } from '@/types'
+import { CpuDifficulty, GridSizeTier, PowerupType, SpeedTier, TrailSpeedTier } from '@/types'
 
 // Grid cell edge length in px per tier — cols/rows are derived from the safe area at this
 // resolution (see utils/grid.ts). Matches the lobby's small/medium/large vehicle icons literally:
@@ -36,18 +36,18 @@ export const SPEED_RAMP_DECREMENT_MS = 7
 export const SPEED_RAMP_MIN_INTERVAL_MS = 26
 
 // Net trail-length growth per tick, as a fraction of the append rate (see gameEngine.ts's
-// shouldTrimTrailAt). 'static' (1) is the original behavior: the tail never follows, so the trail
+// shouldTrimTrailAt). 'off' (1) is the original behavior: the tail never follows, so the trail
 // is the entire path since spawn, appended every tick and never trimmed. Below that, the tail
 // follows — trimmed off the front on enough ticks to hold the trail's long-run growth at this
-// fraction — so the board still inevitably fills in (same as 'static', just delayed) rather than
+// fraction — so the board still inevitably fills in (same as 'off', just delayed) rather than
 // settling into a fixed-length trail players could dodge forever.
-export const TRAIL_GROWTH_RATE: Record<TrailGrowthTier, number> = {
-  fast: 0.25,
-  slow: 0.5,
-  static: 1
+export const TRAIL_SPEED_RATE: Record<TrailSpeedTier, number> = {
+  off: 1,
+  medium: 0.5,
+  fast: 0.25
 }
 
-// Below this length, a non-'static' tier still just grows every tick — trimming (see
+// Below this length, a non-'off' tier still just grows every tick — trimming (see
 // shouldTrimTrailAt) doesn't kick in until the trail's reached this many cells. Trims skipped
 // during this grace period aren't caught up later; the round just starts a handful of ticks ahead
 // of where the nominal rate alone would put it, which is the whole point. Without it, the trail
@@ -134,7 +134,7 @@ export const CPU_EASY_RANDOM_CHANCE = 0.5
 export const CPU_FLOOD_FILL_CAP = 900
 
 // ─── Powerups ───────────────────────────────────────────────────────────────
-// Tick-based (not ms) throughout, matching TRAIL_GROWTH_RATE's own precedent — see gameEngine.ts's
+// Tick-based (not ms) throughout, matching TRAIL_SPEED_RATE's own precedent — see gameEngine.ts's
 // tickGame, which already treats ticks (not wall-clock time) as this game's true unit of time.
 // Real-world cadence then varies slightly with speedTier/gridSizeTier, same as every other
 // tick-denominated constant here. Exactly one pickup is ever on the board at a time (see
@@ -157,7 +157,7 @@ export const POWERUP_EFFECT_DURATION_TICKS: Record<'overdrive' | 'stasis' | 'shi
 export const POWERUP_SPEED_MULTIPLIER: Record<'overdrive' | 'overclock', 2> = { overdrive: 2, overclock: 2 }
 
 // Fraction of a trail's own current length removed from its front on Prune activation — reuses
-// trimTrailFront, the same slice-off-the-front primitive tickGame's periodic trailGrowthTier trim
+// trimTrailFront, the same slice-off-the-front primitive tickGame's periodic trailSpeedTier trim
 // already uses, just applied all at once (and to both players, each relative to its own length)
 // instead of gradually. Proportional rather than a fixed cell count so it stays a meaningful
 // "oh shit" panic button whether the round just started or has run long enough to leave a very

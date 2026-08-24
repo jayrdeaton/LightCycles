@@ -207,7 +207,7 @@ describe('tickGame', () => {
     })
   }
 
-  it('increments tick every advancing call, defaulting trailGrowthRate to 1 (never trims)', () => {
+  it('increments tick every advancing call, defaulting trailSpeedRate to 1 (never trims)', () => {
     let state = makeParallelState()
     for (let i = 1; i <= 4; i++) {
       state = tickGame(state)
@@ -216,7 +216,7 @@ describe('tickGame', () => {
     }
   })
 
-  it('trims the trail tail on ticks needed to hold a sub-1 trailGrowthRate, keeping length below tick count', () => {
+  it('trims the trail tail on ticks needed to hold a sub-1 trailSpeedRate, keeping length below tick count', () => {
     let state = makeParallelState()
     for (let i = 0; i < 8; i++) {
       state = tickGame(state, undefined, 0.5)
@@ -229,7 +229,7 @@ describe('tickGame', () => {
     expect(state.players[2].trail).toHaveLength(7)
   })
 
-  it('never trims below MIN_TRAIL_LENGTH_BEFORE_TRIM, regardless of how low trailGrowthRate is', () => {
+  it('never trims below MIN_TRAIL_LENGTH_BEFORE_TRIM, regardless of how low trailSpeedRate is', () => {
     let state = makeParallelState()
     // A rate this low would nominally trim on almost every tick — the trail should still just grow
     // like the untrimmed default (one cell per tick, no trims at all) until it clears the minimum.
@@ -239,7 +239,7 @@ describe('tickGame', () => {
     }
   })
 
-  it('never trims on the tick a player crashes, even under a sub-1 trailGrowthRate', () => {
+  it('never trims on the tick a player crashes, even under a sub-1 trailSpeedRate', () => {
     const state = makeState({
       players: {
         1: ps({ trail: [{ x: 0, y: 5 }], direction: 'left', color: '#3B82F6' }),

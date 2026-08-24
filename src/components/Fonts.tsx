@@ -1,5 +1,5 @@
-import { Orbitron_700Bold, useFonts } from '@expo-google-fonts/orbitron'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
+import { Orbitron_700Bold, useFonts } from '@expo-google-fonts/orbitron'
 import { ReactNode } from 'react'
 
 import { useSplashReady } from '@/utils/splashGate'

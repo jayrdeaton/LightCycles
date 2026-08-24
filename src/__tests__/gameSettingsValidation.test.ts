@@ -6,7 +6,7 @@ const VALID = {
   gameMode: 'twoPlayer',
   cpuDifficulty: 'normal',
   gridSizeTier: 'medium',
-  trailGrowthTier: 'static',
+  trailSpeedTier: 'off',
   keyScheme: { 1: 'wasd', 2: 'arrows' },
   lockOrientation: false,
   enabledPowerups: []
@@ -30,8 +30,8 @@ describe('isValidSettings', () => {
     for (const gridSizeTier of ['small', 'medium', 'large']) {
       expect(isValidSettings({ ...VALID, gridSizeTier })).toBe(true)
     }
-    for (const trailGrowthTier of ['fast', 'slow', 'static']) {
-      expect(isValidSettings({ ...VALID, trailGrowthTier })).toBe(true)
+    for (const trailSpeedTier of ['off', 'medium', 'fast']) {
+      expect(isValidSettings({ ...VALID, trailSpeedTier })).toBe(true)
     }
     for (const scheme of ['wasd', 'arrows', 'ijkl']) {
       expect(isValidSettings({ ...VALID, keyScheme: { 1: scheme, 2: scheme } })).toBe(true)
@@ -52,8 +52,8 @@ describe('isValidSettings', () => {
     const { gridSizeTier: _gridSizeTier, ...missingGridSizeTier } = VALID
     expect(isValidSettings(missingGridSizeTier)).toBe(false)
 
-    const { trailGrowthTier: _trailGrowthTier, ...missingTrailGrowthTier } = VALID
-    expect(isValidSettings(missingTrailGrowthTier)).toBe(false)
+    const { trailSpeedTier: _trailSpeedTier, ...missingTrailSpeedTier } = VALID
+    expect(isValidSettings(missingTrailSpeedTier)).toBe(false)
 
     const { keyScheme: _keyScheme, ...missingKeyScheme } = VALID
     expect(isValidSettings(missingKeyScheme)).toBe(false)
@@ -64,7 +64,7 @@ describe('isValidSettings', () => {
     expect(isValidSettings({ ...VALID, gameMode: 'coop' })).toBe(false)
     expect(isValidSettings({ ...VALID, cpuDifficulty: 'nightmare' })).toBe(false)
     expect(isValidSettings({ ...VALID, gridSizeTier: 'huge' })).toBe(false)
-    expect(isValidSettings({ ...VALID, trailGrowthTier: 'instant' })).toBe(false)
+    expect(isValidSettings({ ...VALID, trailSpeedTier: 'instant' })).toBe(false)
     expect(isValidSettings({ ...VALID, keyScheme: { 1: 'dvorak', 2: 'arrows' } })).toBe(false)
   })
 

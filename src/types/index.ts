@@ -12,14 +12,13 @@ export type CpuDifficulty = 'easy' | 'normal' | 'hard'
 
 export type GridSizeTier = 'small' | 'medium' | 'large'
 
-// Named for how fast the trail's tail follows the head, not the visible outcome — describing the
-// outcome (a fixed "short"/"full" length) read as backwards as describing the rate did (see
-// lobby.tsx's TRAIL_GROWTH_OPTIONS), since the trail never actually settles at any fixed length
-// under any tier — it still grows without bound, just slower than 1:1 when the tail follows.
-// 'static' matches the game's original behavior: the tail never follows at all, so the trail is
-// the entire path since spawn — see constants/game.ts's TRAIL_GROWTH_RATE and gameEngine.ts's
+// How fast the trail's tail chases the head, not the visible outcome — describing the outcome (a
+// fixed "short"/"full" length) would read backwards, since the trail never actually settles at any
+// fixed length under any tier — it still grows without bound, just slower than 1:1 when the tail
+// follows. 'off' matches the game's original behavior: the tail never follows at all, so the trail
+// is the entire path since spawn — see constants/game.ts's TRAIL_SPEED_RATE and gameEngine.ts's
 // shouldTrimTrailAt for the mechanics.
-export type TrailGrowthTier = 'fast' | 'slow' | 'static'
+export type TrailSpeedTier = 'off' | 'medium' | 'fast'
 
 export type KeyScheme = 'wasd' | 'arrows' | 'ijkl'
 
@@ -102,7 +101,7 @@ export interface GameSettings {
   gameMode: GameMode
   cpuDifficulty: CpuDifficulty
   gridSizeTier: GridSizeTier
-  trailGrowthTier: TrailGrowthTier
+  trailSpeedTier: TrailSpeedTier
   // Web-only in practice (see TouchInputLayer.web.tsx) — native ignores it — but kept on the
   // shared settings shape rather than platform-split, same as every other field here.
   keyScheme: Record<Player, KeyScheme>
@@ -112,7 +111,7 @@ export interface GameSettings {
   lockOrientation: boolean
   // Which powerup types can spawn this round — not a separate on/off flag: "powerups off" is just
   // an empty array (see gameEngine.ts's maybeSpawnPickup, which only ever spawns from this list),
-  // so a single multi-select control (see PowerupPicker.tsx) covers both at once.
+  // so a single multi-select control (see SectionedDropdown.tsx) covers both at once.
   enabledPowerups: PowerupType[]
 }
 
@@ -122,7 +121,7 @@ export interface GameState {
   players: Record<Player, PlayerState>
   outcome: RoundOutcome | null
   // Ticks elapsed since 'playing' started — GameBoard.tsx's head-glide animation keys off this
-  // rather than trail length, since a laggy trailGrowthTier can leave trail length unchanged on a
+  // rather than trail length, since a laggy trailSpeedTier can leave trail length unchanged on a
   // tick that both grows and trims it (see gameEngine.ts's tickGame).
   tick: number
   // Board-wide, not per-player — at most one entry at a time (see gameEngine.ts's

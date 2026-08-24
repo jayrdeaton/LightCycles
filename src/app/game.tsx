@@ -1,5 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
+import { useDeviceOrientation, useOrientationLock, useP1OnRight } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, View } from 'react-native'
@@ -12,13 +13,10 @@ import { PowerupHud } from '@/components/PowerupHud'
 import RoundHistoryPips from '@/components/RoundHistoryPips'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import TouchInputLayer from '@/components/TouchInputLayer'
-import { BOARD_REORIENT_SETTLE_MS, BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS, TRAIL_GROWTH_RATE } from '@/constants/game'
-import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
+import { BOARD_REORIENT_SETTLE_MS, BOARD_RESIZE_THRESHOLD_PX, ROUND_OVER_DIALOG_DELAY_MS, TRAIL_SPEED_RATE } from '@/constants/game'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
-import { useOrientationLock } from '@/hooks/useOrientationLock'
-import { useP1OnRight } from '@/hooks/useP1OnRight'
 import { Direction, GameSettings, OrientationMode, Player, RoundOutcome } from '@/types'
 import { humanPlayersFor } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
@@ -161,7 +159,7 @@ function GameRound({ width, height, settings, colors, orientationMode, p1OnRight
 
   return (
     <>
-      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} pickupColor={themeColors.tertiary} trailGrowthRate={TRAIL_GROWTH_RATE[settings.trailGrowthTier]} />
+      <GameBoardHost players={state.players} phase={state.phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} grid={state.grid} orientationMode={orientationMode} p1OnRight={p1OnRight} tick={state.tick} pickups={state.pickups} pickupColor={themeColors.tertiary} trailSpeedRate={TRAIL_SPEED_RATE[settings.trailSpeedTier]} />
       <TouchInputLayer orientationMode={orientationMode} p1OnRight={p1OnRight} humanPlayers={humanPlayers} enabled={state.phase === 'playing'} onTurn={turn} onActivate={activate} controlInverted={controlInverted} currentDirections={currentDirections} keyScheme={settings.keyScheme} />
       {state.phase === 'playing' && settings.enabledPowerups.length > 0 && <PowerupHud players={state.players} />}
 

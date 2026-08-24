@@ -1,13 +1,10 @@
 import { SeedColor } from '@rific/auto-paper'
+import { InlineColorPicker, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 
-import { IconDropdown } from '@/components/IconDropdown'
-import { InlineColorPicker } from '@/components/InlineColorPicker'
-import { ReadyButton } from '@/components/ReadyButton'
 import { MONO_FONT } from '@/constants/fonts'
 import { useIsTouchPrimaryDevice } from '@/hooks/useIsTouchPrimaryDevice'
-import { PopoverHost, usePopoverHost } from '@/hooks/usePopoverHost'
 import { KeyScheme } from '@/types'
 
 const KEY_SCHEME_OPTIONS: { value: KeyScheme; label: string }[] = [
@@ -46,18 +43,17 @@ export interface LobbyPlayerPanelProps {
   // vs-CPU only has one human player, so the lobby renders its Ready toggle standalone, centered
   // below both slots, instead of embedded in this panel — see lobby.tsx's solo layout.
   showReadyButton?: boolean
-  // See PopoverBody's align prop — pass 'right' for a panel that sits near the screen's right
-  // edge (e.g. player 2 in a side-by-side layout), so its popovers grow leftward instead of
-  // overflowing off-screen.
-  align?: 'left' | 'right'
 }
 
 // One panel per player slot in the lobby ("picking your fighter"): a color picker (interactive for
 // both human and CPU slots, matching the pre-lobby title screen's own behavior of letting the CPU's
 // color be chosen too), a web-only keyboard-scheme picker and a Ready toggle for human slots only.
 // Owns its own popover host shared by its color and control pickers (so opening one closes the
-// other) unless a `host` is passed in to share with another panel instead.
-export function LobbyPlayerPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, keyScheme, onKeySchemeChange, otherKeyScheme, ready, onToggleReady, dark, showReadyButton = true, align }: LobbyPlayerPanelProps) {
+// other) unless a `host` is passed in to share with another panel instead. Neither popover needs an
+// explicit screen-edge alignment hint — both auto-align against their own measured position (see
+// useAutoAlign, used inside InlineColorPicker/SectionedDropdown), which is what actually lets this
+// panel render unmodified whether it lands on the left, right, or center of the screen.
+export function LobbyPlayerPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, keyScheme, onKeySchemeChange, otherKeyScheme, ready, onToggleReady, dark, showReadyButton = true }: LobbyPlayerPanelProps) {
   const ownHost = usePopoverHost()
   const popover = host ?? ownHost
   const isTouchPrimary = useIsTouchPrimaryDevice()
@@ -77,11 +73,16 @@ export function LobbyPlayerPanel({ idPrefix, host, label, color, onColorChange, 
         </Text>
       )}
 
-      {/* Human slots (which, in two-player mode, is both of them) get a face; vs-CPU's CPU slot
-      gets a robot — this is what actually distinguishes "you" from "the CPU" now, not text. */}
-      <InlineColorPicker id={`${idPrefix}-color`} host={popover} value={color} onChange={onColorChange} swatches={swatches} takenValue={takenColor} allowSwapTaken={allowSwapTaken} dark={dark} align={align} icon={isHuman ? 'face-man' : 'robot'} />
+      <View style={styles.pickerRow}>
+        {/* Human slots (which, in two-player mode, is both of them) get a face; vs-CPU's CPU slot
+        gets a robot — this is what actually distinguishes "you" from "the CPU" now, not text. */}
+        <InlineColorPicker id={`${idPrefix}-color`} host={popover} value={color} onChange={onColorChange} swatches={swatches} takenValue={takenColor} allowSwapTaken={allowSwapTaken} dark={dark} icon={isHuman ? 'face-man' : 'robot'} />
 
-      {isHuman && Platform.OS === 'web' && !isTouchPrimary && keyScheme && onKeySchemeChange && <IconDropdown id={`${idPrefix}-controls`} host={popover} icon='keyboard-outline' accessibilityLabel='Control scheme' options={keySchemeOptions} value={keyScheme} onChange={onKeySchemeChange} accentColor={color} mutedColor={mutedColor} dark={dark} align={align} />}
+        {/* Side by side with the color picker rather than stacked — see PlayerSetupPanel (BoxHockey)
+        for the sibling component this mirrors. Web-only (keyboard has no touch-gesture equivalent
+        to pick a "feel" for), so on native/touch this row still only ever shows the color picker. */}
+        {isHuman && Platform.OS === 'web' && !isTouchPrimary && keyScheme && onKeySchemeChange && <SectionedDropdown id={`${idPrefix}-controls`} host={popover} icon='keyboard-outline' accessibilityLabel='Control scheme' sections={[{ kind: 'single', id: 'controls', options: keySchemeOptions, value: keyScheme, onChange: onKeySchemeChange }]} accentColor={color} mutedColor={mutedColor} dark={dark} />}
+      </View>
 
       {isHuman && showReadyButton && onToggleReady && <ReadyButton color={color} ready={ready ?? false} onToggleReady={onToggleReady} />}
     </View>
@@ -93,10 +94,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12
   },
-  // See IconDropdown's anchorOpen comment — this panel is a sibling of the other player's panel
+  // See SectionedDropdown's anchorOpen comment — this panel is a sibling of the other player's panel
   // (and the shared-controls band) in lobby.tsx, so a popover escaping this panel's bounds needs
   // the panel itself elevated, not just the popover content, to paint above a later sibling.
   panelOpen: {
     zIndex: 100
+  },
+  // Same gap as `panel`'s own vertical rhythm, reused horizontally — color picker and key scheme
+  // sit side by side within this row instead of stacked in the panel's own column.
+  pickerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
   }
 })
