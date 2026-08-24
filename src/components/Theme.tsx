@@ -7,6 +7,9 @@ import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR } from '@/constants/game'
 import { useSplashReady } from '@/utils/splashGate'
 
 SplashScreen.preventAutoHideAsync()
+// iOS defaults `fade` to false (Android always fades regardless of this flag), so without this the
+// splash view is just yanked off screen the instant every gate reports ready.
+SplashScreen.setOptions({ fade: true, duration: 400 })
 
 const APPEARANCE_STORAGE_KEY = 'lightcycles.appearance'
 const PLAYER_COLORS_STORAGE_KEY = 'lightcycles.playerColors'
