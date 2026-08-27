@@ -7,11 +7,10 @@ const { withAppDelegate } = require('expo/config-plugins');
 // near the bottom edge from firing mid-gameplay.
 //
 // This is done via swizzling rather than wrapping the root view controller
-// because expo-screen-orientation already installs its own root view
-// controller wrapper (ScreenOrientationViewController); adding another wrapper
-// on top trips UIKit's "already a window's root view controller" check.
-// Swizzling the base class getter works regardless of which concrete class
-// ends up as the root view controller.
+// since a second wrapper installed on top of whatever's already there risks
+// tripping UIKit's "already a window's root view controller" check. Swizzling
+// the base class getter works regardless of which concrete class ends up as
+// the root view controller.
 const SWIZZLE_SWIFT = `
 private let lc_deferBottomEdgeSystemGesturesSwizzle: Void = {
   let cls = UIViewController.self

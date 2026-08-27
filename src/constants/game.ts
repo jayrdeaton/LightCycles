@@ -79,17 +79,52 @@ export const MAX_TICK_DT_MS = 250
 export const ONBOARDING_COUNTDOWN_STEP_MS = 700
 export const ONBOARDING_GO_HOLD_MS = 500
 
-// How long the board sits on the crash's final frame before the round-over dialog appears (see
-// game.tsx) — long enough to actually register what just happened (whose trail hit what) before
-// it gets covered up.
-export const ROUND_OVER_DIALOG_DELAY_MS = 700
+// A last beat once the death sequence (explosion + trail wipe, see GameBoard.tsx and
+// deathAnimationDurationMs below) has already finished and the board's gone quiet — NOT the
+// entire crash-to-dialog gap the way this used to be (see game.tsx, which now adds this on top of
+// deathAnimationDurationMs's own totalMs rather than using it as the whole delay): the animation
+// itself now covers most of "register what just happened," so this only needs to be a brief pause
+// before it gets covered up, not a full second.
+export const ROUND_OVER_DIALOG_HOLD_MS = 300
 export const ONBOARDING_FADE_MS = 300
 
-// Lobby player-panel area (see lobby.tsx): whenever a real device rotation changes orientationMode
-// or which physical side P1 lands on (see useP1OnRight), the panels fade out, the layout
-// underneath swaps while invisible, then they fade back in — masking what would otherwise be an
-// instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is masking
-// a reflow that already happened at the OS's own pace, not a deliberate reveal like onboarding's.
+// ─── Death sequence (see GameBoard.tsx's DeathExplosion/deathWipePath) ─────────────────────────
+// How long the crashed player's head takes to burst into the flash/ring/shards. Fixed, unlike the
+// wipe below — an explosion at a single point has nothing to scale with trail length the way a
+// wipe crossing every trail cell does.
+export const DEATH_EXPLOSION_MS = 420
+
+// How long the crashed player's trail takes to wipe itself out from head to tail, per cell —
+// clamped below at DEATH_WIPE_MIN_MS/MAX_MS the same way TRAIL_SEVER_EAT_MS_PER_CELL's own
+// severed-chunk eat-away is, and for the identical reason (trail length is unbounded), but at a
+// noticeably lower per-cell rate than that constant's 18: a Prune/Shield break only ever severs a
+// small chunk mid-round, while a death wipe can be walking a round-long trail hundreds of cells
+// long — the same rate here would blow straight through the max clamp almost immediately and stop
+// reading as scaling with trail length at all.
+export const DEATH_WIPE_MS_PER_CELL = 6
+export const DEATH_WIPE_MIN_MS = 250
+export const DEATH_WIPE_MAX_MS = 1400
+
+// Single source of truth for the death sequence's total timing, called independently by both
+// GameBoard.tsx (drives the actual withTiming/withDelay calls that animate it) and game.tsx
+// (schedules showResultDialog off the same numbers) — this is what guarantees the two can never
+// drift apart: neither file computes its own duration, both call this against the same
+// (post-crash, never-mutated-again) trail length.
+export function deathAnimationDurationMs(trailLength: number): { explosionMs: number; wipeMs: number; totalMs: number } {
+  const explosionMs = DEATH_EXPLOSION_MS
+  // A 1-cell trail (crashed on the very first tick, before any real movement) has nothing for the
+  // wipe to visibly consume — see GameBoard.tsx's deathWipePath, which already renders nothing
+  // below 2 cells — so there's no reason to still hold the dialog back for DEATH_WIPE_MIN_MS of
+  // nothing.
+  const wipeMs = trailLength <= 1 ? 0 : Math.min(DEATH_WIPE_MAX_MS, Math.max(DEATH_WIPE_MIN_MS, trailLength * DEATH_WIPE_MS_PER_CELL))
+  return { explosionMs, wipeMs, totalMs: explosionMs + wipeMs }
+}
+
+// Lobby player-panel area (see lobby.tsx): whenever a committed tilt reading changes orientationMode
+// or which physical side P1 lands on (see useAccelerometerOrientation), the panels fade out, the
+// layout underneath swaps while invisible, then they fade back in — masking what would otherwise be
+// an instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is
+// masking a reflow that already happened, not a deliberate reveal like onboarding's.
 export const LOBBY_PANEL_SWAP_FADE_MS = 180
 
 // Matches @rific/auto-paper's ColorPicker defaultColors swatches exactly ('Blue' / 'Red') so a
@@ -97,20 +132,6 @@ export const LOBBY_PANEL_SWAP_FADE_MS = 180
 // swatch grid, instead of a default that doesn't match any swatch at all.
 export const DEFAULT_P1_COLOR = '#2196f3'
 export const DEFAULT_P2_COLOR = '#f44336'
-
-// Below this pixel delta, a change to the measured board area (game.tsx's onLayout) is treated as
-// jitter — a transient inset change (e.g. Android's gesture nav bar appearing), not a real resize
-// — and ignored rather than remounting GameRound and discarding an in-progress round. A genuine
-// rotation swaps width/height by hundreds of px, comfortably clearing this.
-export const BOARD_RESIZE_THRESHOLD_PX = 40
-
-// Once a genuine resize clears the threshold above, game.tsx doesn't remount GameRound on the very
-// next layout event — a physical rotation reports several intermediate sizes as the OS animates it,
-// not one clean jump, so committing the first one would remount into a transient, not-yet-final
-// shape. Each qualifying event instead (re)starts this settle window; only once layout goes quiet
-// for its full length does the new size actually commit. Longer than a typical rotation animation
-// (~300ms) so a real device doesn't cut it close and remount a beat early.
-export const BOARD_REORIENT_SETTLE_MS = 450
 
 // CPU difficulty (see utils/cpuAi.ts): both tiers below 'hard' still use the same flood-fill
 // scoring, just follow it less faithfully — chance per tick of taking the second-best move
@@ -156,12 +177,12 @@ export const POWERUP_EFFECT_DURATION_TICKS: Record<'overdrive' | 'stasis' | 'shi
 // multiplier lookup, it's "skip movement entirely," handled as its own case in tickGame.
 export const POWERUP_SPEED_MULTIPLIER: Record<'overdrive' | 'overclock', 2> = { overdrive: 2, overclock: 2 }
 
-// Fraction of a trail's own current length removed from its front on Prune activation — reuses
-// trimTrailFront, the same slice-off-the-front primitive tickGame's periodic trailSpeedTier trim
-// already uses, just applied all at once (and to both players, each relative to its own length)
-// instead of gradually. Proportional rather than a fixed cell count so it stays a meaningful
-// "oh shit" panic button whether the round just started or has run long enough to leave a very
-// long trail. Always leaves at least the head cell intact (see trimTrailFront's own clamp).
+// Fraction of the opponent's own current trail length removed from its front on Prune activation
+// — reuses trimTrailFront, the same slice-off-the-front primitive tickGame's periodic
+// trailSpeedTier trim already uses, just applied all at once instead of gradually. Proportional
+// rather than a fixed cell count so it stays a meaningful punish whether the round just started or
+// has run long enough to leave a very long trail. Always leaves at least the head cell intact (see
+// trimTrailFront's own clamp).
 export const POWERUP_PRUNE_FRACTION = 0.5
 
 // How long the segment severed by a Prune or a Shield break-through takes to visually eat itself
@@ -227,8 +248,8 @@ export interface CpuPowerupAwareness {
   seekPickups: boolean // bias tied survival-safe directions toward a nearby pickup
   seekTieToleranceCells: number // how close two directions' space scores must be to let pickup-seeking break the tie
   defensiveCounters: boolean // pop held Shield when truly cornered
-  opportunisticSelfUse: boolean // use held Overdrive/Prune proactively, not just reactively
-  offensiveUse: boolean // use held Hack/Overclock/Stasis against the opponent when advantageous
+  opportunisticSelfUse: boolean // use held Overdrive proactively, not just reactively
+  offensiveUse: boolean // use held Hack/Overclock/Stasis/Prune against the opponent when advantageous
 }
 export const CPU_POWERUP_AWARENESS: Record<CpuDifficulty, CpuPowerupAwareness> = {
   easy: { seekPickups: false, seekTieToleranceCells: 0, defensiveCounters: true, opportunisticSelfUse: false, offensiveUse: false },
@@ -236,9 +257,8 @@ export const CPU_POWERUP_AWARENESS: Record<CpuDifficulty, CpuPowerupAwareness> =
   hard: { seekPickups: true, seekTieToleranceCells: 40, defensiveCounters: true, opportunisticSelfUse: true, offensiveUse: true }
 }
 export const POWERUP_CPU_OVERDRIVE_MIN_SPACE = 60 // "coast is clear" — floor for opportunistic Overdrive
-export const POWERUP_CPU_PRUNE_SPACE_THRESHOLD = 20 // use held Prune when maneuvering room is getting tight
-export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock/Stasis
-export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock/Stasis anyway, so 'normal'/'hard' don't hoard forever
+export const POWERUP_CPU_OFFENSIVE_SPACE_THRESHOLD = 15 // opponent's own space this low = most punishing moment for Hack/Overclock/Stasis/Prune
+export const POWERUP_CPU_OFFENSIVE_FALLBACK_CHANCE = 0.02 // per-tick chance to use Hack/Overclock/Stasis/Prune anyway, so 'normal'/'hard' don't hoard forever
 
 // Per-tick chance the CPU "notices" it's currently Hack'd and steers to compensate — reasoning
 // about the true best direction as always (see cpuAi.ts's chooseCpuDirection, which never itself

@@ -2,7 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getRgb, getThirdColor, Provider as AutoPaperProvider, ThemeSettings } from '@rific/auto-paper'
 import * as SplashScreen from 'expo-splash-screen'
 import { ReactNode, useCallback, useEffect, useState } from 'react'
+import Reanimated from 'react-native-reanimated'
 
+import { MONO_FONT } from '@/constants/fonts'
 import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR } from '@/constants/game'
 import { useSplashReady } from '@/utils/splashGate'
 
@@ -83,7 +85,17 @@ export function Theme({ children }: Props) {
   if (!settings) return null
 
   return (
-    <AutoPaperProvider initialValue={settings} onChange={onChange}>
+    // reanimated={Reanimated} is what makes Dialog's own animatedStyle prop do anything at all (see
+    // its source: `reanimated && animatedStyle ? <reanimated.View style={animatedStyle}>...` —
+    // without this injection, animatedStyle is silently a no-op on every Dialog in the app, not
+    // just one of them). Metro doesn't rewrite a require()-in-try/catch into its module graph for
+    // this package's ESM build, so the already-imported peer module has to be handed in explicitly
+    // like this instead of @rific/auto-paper importing it directly.
+    // Applies MONO_FONT to every Paper typography variant app-wide — previously threaded through
+    // fontFamily: MONO_FONT on nearly every individual Text/TextInput this app renders (achievements,
+    // ProfileChip, ProfilePicker, ProfilesManager, LabeledDropdown, OnboardingOverlay); those explicit
+    // overrides are now redundant (though harmless if any remain) since the theme itself supplies it.
+    <AutoPaperProvider initialValue={settings} onChange={onChange} reanimated={Reanimated} fontFamily={MONO_FONT}>
       {children}
     </AutoPaperProvider>
   )

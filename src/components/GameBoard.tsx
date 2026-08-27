@@ -1,12 +1,12 @@
 import { getContrastColor } from '@rific/auto-paper'
-import { Canvas, Circle, Line, Path, Skia, vec } from '@shopify/react-native-skia'
+import { Canvas, Circle, Line, Path, Rect, Shadow, Skia, vec } from '@shopify/react-native-skia'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Easing, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
+import { Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
-import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, PowerupPickup } from '@/types'
-import { cellToPixel } from '@/utils/grid'
+import { deathAnimationDurationMs, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
+import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, Portal, PowerupPickup, Tunnel } from '@/types'
+import { cellKey, cellToPixel, isAdjacent } from '@/utils/grid'
 
 export interface GameBoardProps {
   players: Record<Player, PlayerState>
@@ -15,7 +15,7 @@ export interface GameBoardProps {
   cellPx: number
   grid: GridSize
   orientationMode: OrientationMode
-  // Only meaningful when orientationMode === 'sideBySide' — see useP1OnRight and
+  // Only meaningful when orientationMode === 'sideBySide' — see useAccelerometerOrientation and
   // TouchInputLayer.tsx's identical prop.
   p1OnRight: boolean
   // Ticks elapsed this round — see GameState's own comment. Drives PlayerTrail's head-glide
@@ -26,26 +26,34 @@ export interface GameBoardProps {
   // The app theme's tertiary color — pickups render in this, distinct from either player's own
   // primary/secondary trail color, so a glyph never gets mistaken for either player's own head.
   pickupColor: string
+  // Static per-round obstacle layout (see GameState's own comment) — rendered by Obstacles below.
+  obstacles: GridCell[]
+  // The app theme's outline color — distinct from primary/secondary/tertiary, so obstacle geometry
+  // reads as inert board structure rather than being mistaken for either player's trail or a pickup.
+  obstacleColor: string
+  // Static per-round portal pair (see GameState's own comment) — rendered by Portals below. Reuses
+  // obstacleColor rather than a dedicated prop: like obstacles, a portal is static per-round board
+  // structure, not per-player state or a pickup, so the same "inert board structure" color reads
+  // correctly for it too — shape (two rings vs. a filled cell) is what tells them apart.
+  portals: Portal[]
+  // Static per-round tunnel corridor (see GameState's own comment) — rendered by Tunnels below, and
+  // fed into PlayerTrail so it can highlight each player's own underground segments. Also reuses
+  // obstacleColor, same reasoning as `portals` above.
+  tunnels: Tunnel[]
   // The resolved TRAIL_SPEED_RATE number for the active trailSpeedTier (see constants/game.ts) —
   // lets PlayerTrail interpolate the tail's position continuously between trims instead of holding
   // still and then snapping a whole cell forward. Passed as the raw rate, not the tier, so this
   // component stays as decoupled from the tier enum as gameEngine.ts's own tickGame already is.
   trailSpeedRate: number
+  // Per-round GameSettings.wrapEdges — see that field's own comment. Hides Walls below entirely:
+  // the boundary outline promises "this edge is fatal," which stops being true once wrap is on.
+  wrapEdges: boolean
 }
 
 function cellCenter(cell: GridCell, cellPx: number) {
   const { x, y } = cellToPixel(cell, cellPx)
   return { x: x + cellPx / 2, y: y + cellPx / 2 }
 }
-
-// A crashed player's final trail dims relative to the survivor's, but stays legible — not faded
-// to the point it's hard to make out against the board's own black/white background, especially
-// now that the round-over dialog can be tucked away to actually look at the finished board.
-const DEAD_TRAIL_OPACITY = 0.6
-// A neutral grey rather than getContrastColor's black-or-white pick — that function is tuned for
-// a *live* head marker standing out against the board, but on an already-dimmed dead one a pure
-// white ring reads as too bright/stark against the muted fill it's outlining.
-const DEAD_HEAD_OUTLINE_COLOR = '#888888'
 
 // Thin on purpose — this is a boundary marker, not a trail, and shouldn't compete with the
 // trails/heads for visual weight. Flat rather than scaled with cellPx, same reasoning as the head
@@ -96,6 +104,102 @@ function Powerups({ pickups, cellPx, color }: { pickups: PowerupPickup[]; cellPx
   )
 }
 
+// Static per-round board structure, not per-player game state — unlike PowerupGlyph, there's
+// nothing here that ever changes once a round starts (see GameState's own comment on `obstacles`),
+// so this is a plain Rect per cell with no shared values/animation at all. Same two-layer fill+
+// stroke idea as PowerupGlyph's own circles (a near-opaque fill so the cell reads as solid/
+// impassable, plus a stroked outline at the same WALL_STROKE_WIDTH the perimeter walls use, so
+// obstacle geometry reads as the same kind of boundary marker rather than a different visual
+// language) — just static instead of pulsing.
+function ObstacleCell({ cell, cellPx, color }: { cell: GridCell; cellPx: number; color: string }) {
+  const { x, y } = cellToPixel(cell, cellPx)
+  return (
+    <>
+      <Rect x={x} y={y} width={cellPx} height={cellPx} color={color} opacity={0.85} />
+      <Rect x={x} y={y} width={cellPx} height={cellPx} style='stroke' strokeWidth={WALL_STROKE_WIDTH} color={color} />
+    </>
+  )
+}
+
+function Obstacles({ obstacles, cellPx, color }: { obstacles: GridCell[]; cellPx: number; color: string }) {
+  return (
+    <>
+      {obstacles.map((cell) => (
+        <ObstacleCell key={cellKey(cell)} cell={cell} cellPx={cellPx} color={color} />
+      ))}
+    </>
+  )
+}
+
+// Same static-per-round-structure reasoning as ObstacleCell above, but stroke-only (no opaque fill)
+// — a portal must not read as impassable the way a wall does, since stepping onto one redirects the
+// mover rather than blocking them (see gameEngine.ts's tickGame). Renders `a`/`b` identically —
+// neither end is "the" entrance (see Portal's own comment in types/index.ts).
+function PortalGlyph({ portal, cellPx, color }: { portal: Portal; cellPx: number; color: string }) {
+  // Matches PowerupGlyph's own footprint exactly — a portal is meant to read as a real landmark on
+  // the board, not a one-cell blip, and this is already the size players learn to associate with
+  // "something here." The real gameplay hitbox is still just the single a/b cell (see gameEngine.ts's
+  // tickGame) — same "glyph reads bigger than its actual footprint" precedent PowerupGlyph itself
+  // already sets against POWERUP_COLLECT_RADIUS_CELLS.
+  const radius = powerupPickupRadiusPx(cellPx)
+  const a = cellCenter(portal.a, cellPx)
+  const b = cellCenter(portal.b, cellPx)
+  return (
+    <>
+      <Circle cx={a.x} cy={a.y} r={radius} style='stroke' strokeWidth={WALL_STROKE_WIDTH * 1.5} color={color} />
+      <Circle cx={b.x} cy={b.y} r={radius} style='stroke' strokeWidth={WALL_STROKE_WIDTH * 1.5} color={color} />
+    </>
+  )
+}
+
+function Portals({ portals, cellPx, color }: { portals: Portal[]; cellPx: number; color: string }) {
+  return (
+    <>
+      {portals.map((portal) => (
+        <PortalGlyph key={cellKey(portal.a)} portal={portal} cellPx={cellPx} color={color} />
+      ))}
+    </>
+  )
+}
+
+// Reads as an ordinary piece of board structure — a straight road, not a special glyph — per
+// explicit user feedback that the previous single faint centerline + corner-marker mouths didn't
+// read clearly. The corridor is always axis-aligned and dead straight (see arenas.ts's buildTunnel),
+// so its two long edges are just the mouth-to-mouth centerline offset by half a cell, perpendicular
+// to the direction of travel — the same solid WALL_STROKE_WIDTH stroke Walls/ObstacleCell already
+// use, plus a drop shadow so the corridor reads as sitting at a different depth than the flat board
+// around it (still walkable — the underground exemption is purely a collision rule, see
+// gameEngine.ts's tickGame — this is just what makes that legible at a glance).
+function TunnelGlyph({ tunnel, cellPx, color }: { tunnel: Tunnel; cellPx: number; color: string }) {
+  const first = tunnel.cells[0]
+  const last = tunnel.cells[tunnel.cells.length - 1]
+  const firstCenter = cellCenter(first, cellPx)
+  const lastCenter = cellCenter(last, cellPx)
+  const horizontal = first.y === last.y
+  const offsetX = horizontal ? 0 : cellPx / 2
+  const offsetY = horizontal ? cellPx / 2 : 0
+  return (
+    <>
+      <Line p1={vec(firstCenter.x - offsetX, firstCenter.y - offsetY)} p2={vec(lastCenter.x - offsetX, lastCenter.y - offsetY)} strokeWidth={WALL_STROKE_WIDTH} color={color}>
+        <Shadow dx={0} dy={2} blur={3} color='rgba(0, 0, 0, 0.65)' />
+      </Line>
+      <Line p1={vec(firstCenter.x + offsetX, firstCenter.y + offsetY)} p2={vec(lastCenter.x + offsetX, lastCenter.y + offsetY)} strokeWidth={WALL_STROKE_WIDTH} color={color}>
+        <Shadow dx={0} dy={2} blur={3} color='rgba(0, 0, 0, 0.65)' />
+      </Line>
+    </>
+  )
+}
+
+function Tunnels({ tunnels, cellPx, color }: { tunnels: Tunnel[]; cellPx: number; color: string }) {
+  return (
+    <>
+      {tunnels.map((tunnel) => (
+        <TunnelGlyph key={cellKey(tunnel.cells[0])} tunnel={tunnel} cellPx={cellPx} color={color} />
+      ))}
+    </>
+  )
+}
+
 // Each player "owns" the half of the perimeter behind their own zone — the same top/bottom or
 // left/right split TouchInputLayer already uses for input zones (see grid.ts's startingStateFor)
 // — so the wall reads as which player crashes into which edge, not just an arbitrary boundary.
@@ -125,7 +229,7 @@ function wallPath(grid: GridSize, cellPx: number, orientationMode: OrientationMo
   }
 
   // Side-by-side (and web's shared layout): whichever player is currently on the right gets the
-  // right zone — see useP1OnRight for which physical rotation direction puts P1 there (and
+  // right zone — see useAccelerometerOrientation for which physical rotation direction puts P1 there (and
   // TouchInputLayer.tsx's identical split), so the wall matches wherever each player's zone
   // actually ended up rather than assuming a fixed side.
   const onRight = player === 1 ? p1OnRight : !p1OnRight
@@ -144,13 +248,14 @@ function wallPath(grid: GridSize, cellPx: number, orientationMode: OrientationMo
   return path
 }
 
-function Walls({ grid, cellPx, orientationMode, p1OnRight, players, phase }: { grid: GridSize; cellPx: number; orientationMode: OrientationMode; p1OnRight: boolean; players: Record<Player, PlayerState>; phase: GamePhase }) {
+function Walls({ grid, cellPx, orientationMode, p1OnRight, players, phase, wrapEdges }: { grid: GridSize; cellPx: number; orientationMode: OrientationMode; p1OnRight: boolean; players: Record<Player, PlayerState>; phase: GamePhase; wrapEdges: boolean }) {
   const p1Path = useMemo(() => wallPath(grid, cellPx, orientationMode, p1OnRight, 1), [grid, cellPx, orientationMode, p1OnRight])
   const p2Path = useMemo(() => wallPath(grid, cellPx, orientationMode, p1OnRight, 2), [grid, cellPx, orientationMode, p1OnRight])
 
   // Hidden during the onboarding countdown — the boundary marker is only meaningful once a round
-  // is actually live, and it visually clutters the countdown's own player-zone overlay.
-  if (phase === 'onboarding') return null
+  // is actually live, and it visually clutters the countdown's own player-zone overlay. Hidden for
+  // the whole round under wrapEdges — see GameBoardProps' own comment on that prop.
+  if (phase === 'onboarding' || wrapEdges) return null
 
   return (
     <>
@@ -184,14 +289,127 @@ function trailPath(trail: PlayerState['trail'], cellPx: number) {
   if (trail.length === 0) return path
   const first = cellCenter(trail[0], cellPx)
   path.moveTo(first.x, first.y)
+  let prev = trail[0]
   for (const cell of trail.slice(1)) {
     const { x, y } = cellCenter(cell, cellPx)
-    path.lineTo(x, y)
+    // A portal crossing (see gameEngine.ts's tickGame) is the one way two consecutive trail cells
+    // can land non-adjacent — moveTo instead of lineTo there so the path starts a fresh subpath on
+    // the far side instead of drawing a straight line across the board between them.
+    if (isAdjacent(prev, cell)) path.lineTo(x, y)
+    else path.moveTo(x, y)
+    prev = cell
   }
   return path
 }
 
-function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRate }: { player: PlayerState; phase: GamePhase; tickIntervalMs: number; cellPx: number; tick: number; trailSpeedRate: number }) {
+// The underground portion of a player's own trail, as a separate Skia path rendered underneath the
+// normal trail so both players can see at a glance which segments are "safe crossings" that don't
+// block surface traffic (see gameEngine.ts's tickGame). Structurally identical to trailPath above,
+// just filtered to tunnel-member runs instead of walking the whole trail — breaks to a fresh
+// subpath at any non-member gap. Never needs trailPath's own isAdjacent branching: tunnel traversal
+// is always a chain of geometrically adjacent steps (unlike a portal jump), so consecutive
+// tunnel-member cells are always genuinely adjacent here too.
+function tunnelHighlightPath(trail: PlayerState['trail'], tunnelCellSet: ReadonlySet<string>, cellPx: number) {
+  const path = Skia.Path.Make()
+  let drawing = false
+  for (const cell of trail) {
+    const isMember = tunnelCellSet.has(cellKey(cell))
+    if (!isMember) {
+      drawing = false
+      continue
+    }
+    const { x, y } = cellCenter(cell, cellPx)
+    if (drawing) path.lineTo(x, y)
+    else {
+      path.moveTo(x, y)
+      drawing = true
+    }
+  }
+  return path
+}
+
+// Walks `progress` (0 = nothing eaten, 1 = fully eaten) across an ordered chain of grid cells and
+// returns a path through only the still-uneaten suffix — the boundary cell itself is interpolated
+// between its two neighbors (rather than snapping a whole cell at a time) so the eaten edge creeps
+// smoothly. Shared by two callers that feed it differently-ordered chains for two different
+// reasons: severedPath (break-point-first, eating toward the old tail) and PlayerTrail's own death
+// wipe (head-first, eating toward the tail — see deathWipeCells below), both driven by this exact
+// same algorithm. Marked 'worklet' (rather than relying on the Babel plugin's auto-workletizing of
+// the useDerivedValue callbacks that call it) since it's a standalone named function referenced
+// from inside those callbacks, not itself passed directly to a Reanimated hook — see
+// resolveTurnIntent in utils/turnIntent.ts for the same pattern.
+function partialTrailPath(cells: { x: number; y: number }[], progress: number, cellPx: number) {
+  'worklet'
+  const path = Skia.Path.Make()
+  if (cells.length < 2) return path
+  const eatenFloat = progress * (cells.length - 1)
+  const eatenWhole = Math.floor(eatenFloat)
+  if (eatenWhole >= cells.length - 1) return path
+  const frac = eatenFloat - eatenWhole
+  const a = cells[eatenWhole]
+  const b = cells[eatenWhole + 1]
+  // A portal crossing (see gameEngine.ts's tickGame) is the one way two consecutive cells here can
+  // land non-adjacent — skip the fractional lerp across it (which would otherwise draw an off-grid
+  // diagonal for a frame) and jump straight to `b` instead. Inlined rather than calling grid.ts's
+  // isAdjacent: this function is a Reanimated worklet, and an imported function isn't guaranteed to
+  // cross that boundary the way a same-file worklet can.
+  const adjacent = Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1
+  if (adjacent) path.moveTo((a.x + (b.x - a.x) * frac) * cellPx + cellPx / 2, (a.y + (b.y - a.y) * frac) * cellPx + cellPx / 2)
+  else path.moveTo(b.x * cellPx + cellPx / 2, b.y * cellPx + cellPx / 2)
+  for (let i = eatenWhole + 1; i < cells.length; i++) {
+    path.lineTo(cells[i].x * cellPx + cellPx / 2, cells[i].y * cellPx + cellPx / 2)
+  }
+  return path
+}
+
+// Purely cosmetic shape/sizing for the burst below — kept local rather than in constants/game.ts,
+// which is reserved for the cross-file *timing* numbers game.tsx also needs (see
+// deathAnimationDurationMs) — nothing here needs to be known outside this file, same precedent as
+// WALL_STROKE_WIDTH above.
+const DEATH_EXPLOSION_RING_MAX_SCALE = 4 // shockwave ring's peak radius, as a multiple of headRadius
+const DEATH_EXPLOSION_SHARD_COUNT = 8
+
+// The crashed player's head bursting apart: a flash core, an expanding shockwave ring, and a fixed
+// ring of shard dots flying outward — all driven off the single `explosion` shared value (0 -> 1,
+// see PlayerTrail's own death-trigger effect) so every piece stays exactly in sync with no separate
+// timers to drift apart. Drawn in the player's own color, like every other on-board effect in this
+// file (the effect-tell rings above included) — no new neutral/white tint introduced just for this.
+// The flash is the head's own replacement, not an addition on top of it — PlayerTrail's dead branch
+// below no longer draws a static head circle at all once a player's crashed.
+function DeathExplosion({ centerX, centerY, explosion, headRadius, color }: { centerX: number; centerY: number; explosion: SharedValue<number>; headRadius: number; color: string }) {
+  // Confined to the burst's first 40% (remapped, same layered-remap trick PowerupGlyph.radius above
+  // already does with intro/pulse) so it reads as an instant flash rather than a slow fade.
+  const flashRadius = useDerivedValue(() => headRadius * (1 + Math.min(1, explosion.value / 0.4) * 0.6))
+  const flashOpacity = useDerivedValue(() => 1 - Math.min(1, explosion.value / 0.4))
+  const ringRadius = useDerivedValue(() => headRadius * (1 + explosion.value * (DEATH_EXPLOSION_RING_MAX_SCALE - 1)))
+  const ringOpacity = useDerivedValue(() => 1 - explosion.value)
+
+  return (
+    <>
+      <Circle cx={centerX} cy={centerY} r={flashRadius} color={color} opacity={flashOpacity} />
+      <Circle cx={centerX} cy={centerY} r={ringRadius} style='stroke' strokeWidth={2} color={color} opacity={ringOpacity} />
+      {Array.from({ length: DEATH_EXPLOSION_SHARD_COUNT }, (_, i) => (
+        <ExplosionShard key={i} angle={(i / DEATH_EXPLOSION_SHARD_COUNT) * Math.PI * 2} centerX={centerX} centerY={centerY} explosion={explosion} headRadius={headRadius} color={color} />
+      ))}
+    </>
+  )
+}
+
+// One flying ember of the burst above, as its own component rather than a loop of hooks inside
+// DeathExplosion — keeps each shard's own useDerivedValue calls one-hook-per-component-instance,
+// which a variable-length loop inside a single component can't safely do. `angle` is deterministic
+// (evenly spaced, not random) so the burst is reproducible and never looks lopsided.
+function ExplosionShard({ angle, centerX, centerY, explosion, headRadius, color }: { angle: number; centerX: number; centerY: number; explosion: SharedValue<number>; headRadius: number; color: string }) {
+  const distance = headRadius * DEATH_EXPLOSION_RING_MAX_SCALE
+  const cx = useDerivedValue(() => centerX + Math.cos(angle) * distance * explosion.value)
+  const cy = useDerivedValue(() => centerY + Math.sin(angle) * distance * explosion.value)
+  const radius = useDerivedValue(() => headRadius * 0.35 * (1 - explosion.value))
+  const opacity = useDerivedValue(() => 1 - explosion.value)
+
+  return <Circle cx={cx} cy={cy} r={radius} color={color} opacity={opacity} />
+}
+
+function PlayerTrail({ player, tickIntervalMs, cellPx, tick, trailSpeedRate, tunnelCellSet }: { player: PlayerState; tickIntervalMs: number; cellPx: number; tick: number; trailSpeedRate: number; tunnelCellSet: ReadonlySet<string> }) {
   // Nearly fill their own cell on purpose — combined with a small cellPx (see constants/game.ts's
   // GRID_CELL_PX), this makes the actual hit-detection boundary obvious at a glance: a trail or head
   // reads as occupying essentially the whole cell it's in, so a one-cell gap between two trails
@@ -249,6 +467,26 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
   // only the suffix of severedCells still "ahead of" this progress. Starts at 1 (nothing to show)
   // rather than 0, so an idle trail with no severed segment yet doesn't render one.
   const severedProgress = useSharedValue(1)
+  // This player's own trail, snapshotted head-first/tail-last the instant they crash (see the
+  // death-trigger effect below) — the reverse order severedCells above uses, since a death wipe
+  // eats from the opposite end (the head, where the crash happened) rather than from a break point
+  // toward the old tail. Same worklet-safe plain-object shape as severedCells, for the same reason.
+  const deathWipeCells = useSharedValue<{ x: number; y: number }[]>([])
+  // 0 = full trail still visible, 1 = fully wiped — same convention as severedProgress, consumed by
+  // deathWipePath below via the same partialTrailPath helper severedPath itself now uses.
+  const wipeProgress = useSharedValue(0)
+  // Drives DeathExplosion, 0 -> 1. At exactly 0 (its resting value until the death-trigger effect
+  // below starts it) the flash core's own radius/opacity formula happens to land on a plain solid
+  // circle at headRadius, full opacity — i.e. an ordinary head marker — so there's no visible seam
+  // between "still alive" and "just died, hasn't started bursting yet."
+  const explosion = useSharedValue(0)
+  // Guards the death-trigger effect below against re-firing on every re-render while `player.alive`
+  // stays false for the rest of `'roundOver'` — a plain ref, not a shared value, since it's only
+  // ever read/written from JS-thread effects, never from a worklet. Reset alongside the other death
+  // shared values in the tick === 0 branch above, which is load-bearing, not just tidy: without
+  // that reset, a second round's own death would be silently swallowed by this ref still saying
+  // "already started" from round 1.
+  const deathAnimStartedRef = useRef(false)
 
   useEffect(() => {
     if (tick === 0) {
@@ -271,6 +509,15 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
       // wherever the previous round's animation happened to stop.
       severedCells.value = []
       severedProgress.value = 1
+      // Same idea for the death sequence: a rematch always starts every player alive again, but the
+      // shared values driving last round's explosion/wipe don't know that on their own. Resetting
+      // deathAnimStartedRef here (not just the shared values) is what actually matters — without it,
+      // the death-trigger effect below would still think this round's own death already "started",
+      // from round 1, and silently never fire for round 2's.
+      deathWipeCells.value = []
+      wipeProgress.value = 0
+      explosion.value = 0
+      deathAnimStartedRef.current = false
       return
     }
     // Duration is measured against the actual gap since the previous tick's glide started, not
@@ -281,15 +528,29 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
     const now = performance.now()
     const duration = Math.max(1, Math.min(now - lastTickAtRef.current, tickIntervalMs * 3))
     lastTickAtRef.current = now
+    // A portal crossing (see gameEngine.ts's tickGame) is the one way this tick's new head cell can
+    // land non-adjacent to the one before it — the ordinary pixel-space glide below assumes
+    // adjacency (it's a straight line from the old position to the new one), so a portal jump has
+    // to snap instantly instead, or it'd visibly slide the head across unrelated board geometry.
+    const prevHeadCell = trail.length > 1 ? trail[trail.length - 2] : null
+    const isPortalJump = prevHeadCell !== null && !isAdjacent(prevHeadCell, trail[trail.length - 1])
+
     // Freeze wherever the head glide actually is *right now* — not its target — as the next
     // segment's fixed anchor, before retargeting it below. See edgeStartX's own comment for why:
     // this is what guarantees the fixed anchor and the animated point are always exactly
     // coincident the instant a new segment starts, regardless of whether the glide this replaces
-    // had actually finished.
-    edgeStartX.value = animX.value
-    edgeStartY.value = animY.value
-    animX.value = withTiming(head.x, { duration, easing: Easing.linear })
-    animY.value = withTiming(head.y, { duration, easing: Easing.linear })
+    // had actually finished. A portal jump instead snaps this straight to the new head — there's no
+    // meaningful "in-flight position" to freeze when the segment about to start isn't a real,
+    // on-screen line at all.
+    edgeStartX.value = isPortalJump ? head.x : animX.value
+    edgeStartY.value = isPortalJump ? head.y : animY.value
+    if (isPortalJump) {
+      animX.value = head.x
+      animY.value = head.y
+    } else {
+      animX.value = withTiming(head.x, { duration, easing: Easing.linear })
+      animY.value = withTiming(head.y, { duration, easing: Easing.linear })
+    }
     // Targets tailTarget (the fractional creep toward nextCenter — see tailProgress), not `tail`
     // itself, so this animates every tick under a non-static tier, not only the ones that trim a
     // whole cell off. That's what actually fixes the held-then-hop cadence: previously this only
@@ -353,31 +614,49 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trail])
 
-  // The severed chain's currently-visible suffix, as a Skia path — a fractional point interpolated
-  // between whichever two cells severedProgress currently falls between (same "creep along one
-  // real segment" technique as tailTarget above), then straight lines through every cell after it
-  // to the old tail. Every point plotted is always either a real trail cell or a lerp between two
-  // ADJACENT ones, which is exactly what makes this immune to the bug it replaces: the old
-  // mechanism free-glided the tail's live position in raw pixel space toward wherever the trail's
-  // new front ended up, with nothing stopping that straight line from cutting across the board at
-  // an angle no real trail could ever occupy. Renders nothing (Skia strokes an empty/1-point path
-  // as nothing) once fully eaten, or when there's no severed segment at all — the idle default.
-  const severedPath = useDerivedValue(() => {
-    const cells = severedCells.value
-    const path = Skia.Path.Make()
-    if (cells.length < 2) return path
-    const eatenFloat = severedProgress.value * (cells.length - 1)
-    const eatenWhole = Math.floor(eatenFloat)
-    if (eatenWhole >= cells.length - 1) return path
-    const frac = eatenFloat - eatenWhole
-    const a = cells[eatenWhole]
-    const b = cells[eatenWhole + 1]
-    path.moveTo((a.x + (b.x - a.x) * frac) * cellPx + cellPx / 2, (a.y + (b.y - a.y) * frac) * cellPx + cellPx / 2)
-    for (let i = eatenWhole + 1; i < cells.length; i++) {
-      path.lineTo(cells[i].x * cellPx + cellPx / 2, cells[i].y * cellPx + cellPx / 2)
-    }
-    return path
-  })
+  // Kicks off this player's death sequence the instant `player.alive` flips false — the crash
+  // itself, not a tick or a phase prop, is the real trigger (mirrors the severed-eat effect above's
+  // own "react to the data itself" idiom). Guarded by deathAnimStartedRef, not just the `false`
+  // dependency, since `player.alive` staying false for the rest of `'roundOver'` would otherwise
+  // re-run this every time PlayerTrail re-renders for any other reason (an opponent's own
+  // still-live head animating, for instance).
+  useEffect(() => {
+    if (player.alive || deathAnimStartedRef.current) return
+    deathAnimStartedRef.current = true
+    const { explosionMs, wipeMs } = deathAnimationDurationMs(trail.length)
+    // See the severed-eat effect above's own comment on react-hooks/immutability — same
+    // SharedValue.value idiom, same reason it's safe to disable here.
+    /* eslint-disable react-hooks/immutability */
+    // Head-first, tail-last (the reverse of severedCells' own break-point-first order above) — see
+    // partialTrailPath's own comment for why that ordering is what makes progress 0->1 eat from the
+    // head end toward the tail, matching where the crash actually happened.
+    deathWipeCells.value = [...trail].reverse().map((c) => ({ x: c.x, y: c.y }))
+    explosion.value = withTiming(1, { duration: explosionMs, easing: Easing.out(Easing.cubic) })
+    // Doesn't start eating until the explosion's own burst has finished — the trail should still
+    // read as "there," rooting the explosion to something, while the car itself is bursting apart.
+    wipeProgress.value = withDelay(explosionMs, withTiming(1, { duration: wipeMs, easing: Easing.linear }))
+    /* eslint-enable react-hooks/immutability */
+    // Deliberately keyed only on player.alive — trail is read once here, at the exact instant it
+    // flips, and (unlike a live player's trail) never changes again for the rest of the round, so
+    // there's nothing for a wider dependency list to catch that this would miss.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player.alive])
+
+  // The severed chain's currently-visible suffix, as a Skia path — see partialTrailPath's own
+  // comment for the interpolation technique. Renders nothing (Skia strokes an empty/1-point path as
+  // nothing) once fully eaten, or when there's no severed segment at all — the idle default.
+  const severedPath = useDerivedValue(() => partialTrailPath(severedCells.value, severedProgress.value, cellPx))
+
+  // This player's own trail wiping itself out from head to tail once they've crashed — same
+  // technique, walking deathWipeCells (head-first — see the death-trigger effect above) instead of
+  // severedCells. Renders nothing once fully wiped, which is the deliberate final state: no dimmed
+  // remnant left behind (see the dead-player render branch below).
+  const deathWipePath = useDerivedValue(() => partialTrailPath(deathWipeCells.value, wipeProgress.value, cellPx))
+
+  // This player's own underground segments — see tunnelHighlightPath's own comment. A plain useMemo
+  // (not a shared value/worklet) is enough: unlike the death/sever animations above, there's nothing
+  // here that needs to animate frame-by-frame, only to update when the trail itself changes.
+  const tunnelPath = useMemo(() => tunnelHighlightPath(trail, tunnelCellSet, cellPx), [trail, tunnelCellSet, cellPx])
 
   // `anchorCell` is where the head stood BEFORE its most recent move, as a GRID cell — matching
   // `trail`'s own element type, not `head`'s pixel one, since boundaryIndex below searches for it
@@ -419,7 +698,6 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
   // are instead tracked live by (tailAnimX, tailAnimY) and (animX, animY) below so both ends glide
   // into place rather than snapping).
   const settledPath = useMemo(() => trailPath(trail.slice(1, boundaryIndex + 1), cellPx), [trail, cellPx, boundaryIndex])
-  const fullPath = useMemo(() => trailPath(trail, cellPx), [trail, cellPx])
 
   // trail[boundaryIndex] (this segment's true fixed anchor) and trail[1] (nextCell/nextCenter, the
   // tail segment's own far end) are the exact same cell whenever boundaryIndex === 1 — the trail's
@@ -458,12 +736,18 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
   // up to it yet).
   const tailEdgeEnd = useDerivedValue(() => (trail.length > 2 ? vec(nextCenter.x, nextCenter.y) : vec(animX.value, animY.value)))
 
-  const dimmed = phase === 'roundOver' && !player.alive
+  // Where the explosion above bursts from — `player.crashCell` when set (populated even for an
+  // out-of-bounds crash, whose true destination has no `trail` slot of its own — see PlayerState's
+  // own comment) so the burst centers exactly on the real collision point rather than the last
+  // valid on-grid cell short of it.
+  const deathCenter = player.crashCell ? cellCenter(player.crashCell, cellPx) : head
 
   return (
     <>
       {player.alive ? (
         <>
+          {/* Underneath everything else — see tunnelHighlightPath's own comment. */}
+          <Path path={tunnelPath} style='stroke' strokeWidth={trailWidth * 1.6} strokeCap='round' strokeJoin='round' color={player.color} opacity={0.35} />
           <Path path={settledPath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} />
           {/* The chain a Prune/Shield break just cut off `trail` entirely — no longer part of
           settledPath/tailEdgeEnd's own data at all, but still visibly eating itself away for a
@@ -489,28 +773,40 @@ function PlayerTrail({ player, phase, tickIntervalMs, cellPx, tick, trailSpeedRa
           {player.effects.shield && <Circle cx={animX} cy={animY} r={headRadius * 2.05} style='stroke' strokeWidth={2} color={POWERUP_EFFECT_COLORS.shield} />}
         </>
       ) : (
-        // Round already decided for this player — show the exact final path statically rather
-        // than mid-glide, but keep a (static, non-animated) head marker at the crash cell so
-        // exactly where they went down is still visible, not just inferable from where the line
-        // happens to end.
+        // Round already decided for this player — the crash itself already fired their death
+        // sequence (see the death-trigger effect above): the head bursts apart, then the trail
+        // wipes itself out from head to tail. No static freeze-frame anymore — deathWipePath
+        // renders the full trail at explosion=wipeProgress=0 and progressively less as wipeProgress
+        // advances, ending at nothing, which is the deliberate final state (see deathWipePath's own
+        // comment) — nothing left to dim once it's gone.
         <>
-          <Path path={fullPath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} opacity={dimmed ? DEAD_TRAIL_OPACITY : 1} />
-          <Circle cx={head.x} cy={head.y} r={headRadius} color={player.color} opacity={dimmed ? DEAD_TRAIL_OPACITY : 1} />
-          <Circle cx={head.x} cy={head.y} r={headRadius} style='stroke' strokeWidth={1.5} color={DEAD_HEAD_OUTLINE_COLOR} opacity={dimmed ? DEAD_TRAIL_OPACITY : 1} />
+          <Path path={tunnelPath} style='stroke' strokeWidth={trailWidth * 1.6} strokeCap='round' strokeJoin='round' color={player.color} opacity={0.35} />
+          <Path path={deathWipePath} style='stroke' strokeWidth={trailWidth} strokeCap='round' strokeJoin='round' color={player.color} />
+          <DeathExplosion centerX={deathCenter.x} centerY={deathCenter.y} explosion={explosion} headRadius={headRadius} color={player.color} />
         </>
       )}
     </>
   )
 }
 
-export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, pickupColor, trailSpeedRate }: GameBoardProps) {
+export function GameBoard({ players, phase, tickIntervalMs, cellPx, grid, orientationMode, p1OnRight, tick, pickups, pickupColor, obstacles, obstacleColor, portals, tunnels, trailSpeedRate, wrapEdges }: GameBoardProps) {
+  // Computed once here (not inside PlayerTrail) so both players' own PlayerTrail instances share
+  // the exact same Set rather than each rebuilding an identical one from the same static `tunnels`.
+  const tunnelCellSet = useMemo(() => new Set(tunnels.flatMap((tunnel) => tunnel.cells.map(cellKey))), [tunnels])
+
   return (
     <View style={styles.container}>
       <Canvas style={StyleSheet.absoluteFill}>
-        <Walls grid={grid} cellPx={cellPx} orientationMode={orientationMode} p1OnRight={p1OnRight} players={players} phase={phase} />
+        <Walls grid={grid} cellPx={cellPx} orientationMode={orientationMode} p1OnRight={p1OnRight} players={players} phase={phase} wrapEdges={wrapEdges} />
+        {/* Unlike Walls above, not hidden during onboarding — obstacle/portal/tunnel placement is
+        gameplay information a player needs to see before the round starts, not just a boundary
+        marker that clutters the countdown's own zone overlay. */}
+        <Obstacles obstacles={obstacles} cellPx={cellPx} color={obstacleColor} />
+        <Portals portals={portals} cellPx={cellPx} color={obstacleColor} />
+        <Tunnels tunnels={tunnels} cellPx={cellPx} color={obstacleColor} />
         <Powerups pickups={pickups} cellPx={cellPx} color={pickupColor} />
-        <PlayerTrail player={players[1]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} />
-        <PlayerTrail player={players[2]} phase={phase} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} />
+        <PlayerTrail player={players[1]} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} tunnelCellSet={tunnelCellSet} />
+        <PlayerTrail player={players[2]} tickIntervalMs={tickIntervalMs} cellPx={cellPx} tick={tick} trailSpeedRate={trailSpeedRate} tunnelCellSet={tunnelCellSet} />
       </Canvas>
     </View>
   )

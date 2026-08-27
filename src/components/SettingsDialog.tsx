@@ -31,9 +31,14 @@ export interface SettingsDialogProps {
   onDismiss: () => void
   settings: GameSettings
   setSettings: (update: Partial<GameSettings>) => void
+  // Live physical-hold rotation (see @tastic/split-screen's getViewRotation) — this is a centered,
+  // app-wide modal with no per-player zone to match (unlike OnboardingOverlay/RoundOverDialog), so
+  // it just rotates its own content in place; defaults to 0 for call sites that don't have a live
+  // orientation signal handy (there's nothing else for it to stay consistent with).
+  rotation?: number
 }
 
-export function SettingsDialog({ visible, onDismiss, settings, setSettings }: SettingsDialogProps) {
+export function SettingsDialog({ visible, onDismiss, settings, setSettings, rotation = 0 }: SettingsDialogProps) {
   const { dark, colors } = useAutoPaperTheme()
   const { settings: hapticSettings, set: setHapticSettings } = useHapticSettings()
   const { settings: soundSettings, set: setSoundSettings } = useSoundSettings()
@@ -66,7 +71,7 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
 
   return (
     <>
-      <Dialog visible={visible} onDismiss={onDismiss} style={styles.dialog}>
+      <Dialog visible={visible} onDismiss={onDismiss} style={[styles.dialog, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>
         <Dialog.Title>Settings</Dialog.Title>
         {/* react-native-paper's Dialog.ScrollArea has a fixed 24px marginBottom baked in (meant to
           reserve room for a Dialog.Actions row below it) — overridden to 0 since this dialog has
@@ -160,7 +165,7 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings }: Se
       {infoMessage && (
         <Portal>
           <View style={styles.overlay}>
-            <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>
               <Icon source='information-outline' size={64} color={colors.secondary} />
               <Text variant='headlineLarge' style={[styles.overlayTitle, { color: colors.secondary }]}>
                 {infoMessage.title}
@@ -218,6 +223,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     gap: 16,
+    maxWidth: 360,
     padding: 32
   },
   overlayTitle: { fontWeight: 'bold' },

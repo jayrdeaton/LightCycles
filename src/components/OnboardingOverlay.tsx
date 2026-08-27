@@ -1,3 +1,4 @@
+import { getOpposingZoneRotation, ViewRotation } from '@tastic/split-screen'
 import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
@@ -12,6 +13,14 @@ export interface OnboardingOverlayProps {
   orientationMode: OrientationMode
   // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
   p1OnRight: boolean
+  // Live physical-hold rotation (see @tastic/split-screen's getViewRotation) — applied to the
+  // countdown text itself, NOT the zone it sits in. Deliberately not a FakeLandscapeView wrapper
+  // around this whole component: that swaps width/height to fake a landscape-shaped screen, which
+  // is right for the lobby's genuinely-wide layout but wrong here — these zones must stay exactly
+  // the same shape as the board's own fixed split (see orientationMode's own comment), or the
+  // swap distorts a full-width/half-height zone into a narrow, tall one that no longer matches
+  // where TouchInputLayer's own (unrotated) hit zones actually are. Only the text rotates in place.
+  rotation: ViewRotation
   humanPlayers: Player[]
   p1Color: string
   p2Color: string
@@ -33,7 +42,7 @@ const COUNTDOWN_STAGES = ['3', '2', '1', 'GO!']
 // right-side-up from that player's actual physical side of the device rather than upside-down.
 // Solo (vs CPU) gets a single full-board zone — TouchInputLayer never splits the board when
 // there's only one human to swipe on it. The whole thing fades out and calls onComplete.
-export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPlayers, p1Color, p2Color, roundHistory, onComplete }: OnboardingOverlayProps) {
+export default function OnboardingOverlay({ orientationMode, p1OnRight, rotation, humanPlayers, p1Color, p2Color, roundHistory, onComplete }: OnboardingOverlayProps) {
   const opacity = useSharedValue(1)
   const [stageIndex, setStageIndex] = useState(0)
 
@@ -74,7 +83,7 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPla
 
   const isFaceToFace = orientationMode === 'faceToFace'
   const countdown = COUNTDOWN_STAGES[stageIndex]
-  // Side-by-side: whichever player is on the right (see useP1OnRight) gets the right zone —
+  // Side-by-side: whichever player is on the right (see useAccelerometerOrientation) gets the right zone —
   // matches GameBoard.tsx's identical wallPath split.
   const p1Zone = isFaceToFace ? styles.zoneBottom : p1OnRight ? styles.zoneRight : styles.zoneLeft
   const p2Zone = isFaceToFace ? styles.zoneTop : p1OnRight ? styles.zoneLeft : styles.zoneRight
@@ -83,7 +92,7 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPla
     <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents='none'>
       {humanPlayers.length === 1 ? (
         <View style={[styles.zone, styles.zoneFull, { borderColor: humanPlayers[0] === 1 ? p1Color : p2Color, backgroundColor: `${humanPlayers[0] === 1 ? p1Color : p2Color}22` }]}>
-          <Text style={styles.countdown}>{countdown}</Text>
+          <Text style={[styles.countdown, { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
           {/* Stacked in normal flow below the digit (rather than the absolutely-centered overlay
           used for the two-zone case below) since a solo zone's countdown is already dead-center —
           overlaying pips there would sit right on top of the digit instead of under it. */}
@@ -96,10 +105,14 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, humanPla
       ) : (
         <>
           <View style={[styles.zone, p1Zone, { borderColor: p1Color, backgroundColor: `${p1Color}22` }]}>
-            <Text style={styles.countdown}>{countdown}</Text>
+            <Text style={[styles.countdown, { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
           </View>
           <View style={[styles.zone, p2Zone, { borderColor: p2Color, backgroundColor: `${p2Color}22` }]}>
-            <Text style={[styles.countdown, isFaceToFace && styles.countdownFlipped]}>{countdown}</Text>
+            {/* getOpposingZoneRotation, not the board's own always-'faceToFace' orientationMode above
+            (that's structural — isFaceToFace is always true here, so it can never stand in for an
+            actual live landscape hold) — see that function's own doc for why P2's digit only gets
+            the +180 baseline flip in portrait, not landscape. */}
+            <Text style={[styles.countdown, { transform: [{ rotate: `${getOpposingZoneRotation(rotation)}deg` }] }]}>{countdown}</Text>
           </View>
 
           {roundHistory.length > 0 && (
@@ -122,9 +135,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.6)',
     textShadowOffset: { height: 2, width: 0 },
     textShadowRadius: 8
-  },
-  countdownFlipped: {
-    transform: [{ rotate: '180deg' }]
   },
   // Solo zone only — the countdown digit and this row are both children of the same centered
   // zone, so this margin is what separates them instead of the digit's own line-height doing it.

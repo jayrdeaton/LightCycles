@@ -21,6 +21,14 @@ export function isInBounds(cell: GridCell, grid: GridSize): boolean {
   return cell.x >= 0 && cell.y >= 0 && cell.x < grid.cols && cell.y < grid.rows
 }
 
+// Re-enters an off-grid cell from the opposite edge — wrap-mode's counterpart to isInBounds above
+// (see gameEngine.ts's tickGame, which checks isInBounds first and only wraps a cell that's
+// already failed it). The double-mod handles a negative coordinate (stepping off the top/left)
+// correctly, since JS's % can return a negative result that a single mod wouldn't clean up.
+export function wrapCell(cell: GridCell, grid: GridSize): GridCell {
+  return { x: ((cell.x % grid.cols) + grid.cols) % grid.cols, y: ((cell.y % grid.rows) + grid.rows) % grid.rows }
+}
+
 export function stepCell(cell: GridCell, direction: Direction): GridCell {
   switch (direction) {
     case 'up':
@@ -38,6 +46,17 @@ export function isOppositeDirection(a: Direction, b: Direction): boolean {
   return (a === 'up' && b === 'down') || (a === 'down' && b === 'up') || (a === 'left' && b === 'right') || (a === 'right' && b === 'left')
 }
 
+// True when `b` is exactly one step from `a` — the only distance stepCell itself can ever produce.
+// The sole source of truth GameBoard.tsx's trail rendering uses to tell an ordinary step apart from
+// a portal jump (see gameEngine.ts's tickGame, which is the only place a trail's newest cell can
+// ever land non-adjacent to the one before it): every consecutive trail pair is adjacent except
+// exactly the cell immediately after a portal crossing. Relies on the portal placement generator
+// (see arenas.ts's PORTAL_MIN_PAIR_DISTANCE_CELLS) keeping a pair's two cells well past distance 1,
+// so this check can never mistake a portal's own entrance/exit for a normal step.
+export function isAdjacent(a: GridCell, b: GridCell): boolean {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1
+}
+
 // Starting head + heading for each player, given the grid and the current orientation mode. Face-
 // to-face (portrait, tall grid) starts players top/bottom moving toward each other along the y
 // axis; side-by-side (landscape, wide grid — and web, which shares this layout) starts them
@@ -45,9 +64,9 @@ export function isOppositeDirection(a: Direction, b: Direction): boolean {
 // owner, so in face-to-face they get the "near" bottom zone (the natural portrait orientation
 // faces them) while player 2 is the "far" player (top zone, needs the input flip — see
 // utils/turnIntent.ts). In side-by-side, `p1OnRight` decides which zone is player 1's — see
-// useP1OnRight — so a player's actual starting cycle always lands in the same zone GameBoard.tsx's
-// wallPath and TouchInputLayer.tsx's hit zone are drawn for, rather than a side that's fixed
-// regardless of which way the device was rotated.
+// useAccelerometerOrientation — so a player's actual starting cycle always lands in the same zone
+// GameBoard.tsx's wallPath and TouchInputLayer.tsx's hit zone are drawn for, rather than a side
+// that's fixed regardless of which way the device was rotated.
 //
 // Each player starts at the dead center of their own half of the board (their "zone" — see
 // GameBoard.tsx/TouchInputLayer.tsx's identical split) rather than hugging the outer wall. That

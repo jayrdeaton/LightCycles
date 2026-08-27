@@ -94,15 +94,15 @@ jest.mock('expo-splash-screen', () => ({
   hideAsync: jest.fn().mockResolvedValue(undefined)
 }))
 
-// expo-screen-orientation
-jest.mock('expo-screen-orientation', () => ({
-  OrientationLock: {
-    DEFAULT: 'DEFAULT',
-    PORTRAIT_UP: 'PORTRAIT_UP',
-    LANDSCAPE: 'LANDSCAPE'
-  },
-  lockAsync: jest.fn().mockResolvedValue(undefined),
-  unlockAsync: jest.fn().mockResolvedValue(undefined)
+// expo-sensors
+jest.mock('expo-sensors', () => ({
+  DeviceMotion: {
+    Gravity: 9.80665,
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
+    removeAllListeners: jest.fn(),
+    setUpdateInterval: jest.fn(),
+    isAvailableAsync: jest.fn().mockResolvedValue(true)
+  }
 }))
 
 // react-native-gesture-handler

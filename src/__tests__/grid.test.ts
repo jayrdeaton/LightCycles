@@ -1,5 +1,5 @@
 import { GRID_CELL_PX } from '@/constants/game'
-import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell } from '@/utils/grid'
+import { cellKey, computeGridSize, isAdjacent, isInBounds, isOppositeDirection, startingStateFor, stepCell, wrapCell } from '@/utils/grid'
 
 describe('computeGridSize', () => {
   it('floors pixel dimensions down to whole cells', () => {
@@ -47,6 +47,24 @@ describe('isInBounds', () => {
   })
 })
 
+describe('wrapCell', () => {
+  const grid = { cols: 10, rows: 8 }
+
+  it('leaves an already-in-bounds cell untouched', () => {
+    expect(wrapCell({ x: 5, y: 4 }, grid)).toEqual({ x: 5, y: 4 })
+  })
+
+  it('wraps a step past the right/bottom edge back to 0 on that axis', () => {
+    expect(wrapCell({ x: 10, y: 4 }, grid)).toEqual({ x: 0, y: 4 })
+    expect(wrapCell({ x: 5, y: 8 }, grid)).toEqual({ x: 5, y: 0 })
+  })
+
+  it('wraps a step past the left/top edge to the far edge on that axis', () => {
+    expect(wrapCell({ x: -1, y: 4 }, grid)).toEqual({ x: 9, y: 4 })
+    expect(wrapCell({ x: 5, y: -1 }, grid)).toEqual({ x: 5, y: 7 })
+  })
+})
+
 describe('isOppositeDirection', () => {
   it('identifies opposite pairs', () => {
     expect(isOppositeDirection('up', 'down')).toBe(true)
@@ -56,6 +74,27 @@ describe('isOppositeDirection', () => {
   it('rejects non-opposite pairs', () => {
     expect(isOppositeDirection('up', 'up')).toBe(false)
     expect(isOppositeDirection('up', 'left')).toBe(false)
+  })
+})
+
+describe('isAdjacent', () => {
+  it('accepts every 4-directional neighbor', () => {
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 5, y: 4 })).toBe(true)
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 5, y: 6 })).toBe(true)
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 4, y: 5 })).toBe(true)
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 6, y: 5 })).toBe(true)
+  })
+
+  it('rejects the same cell', () => {
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 5, y: 5 })).toBe(false)
+  })
+
+  it('rejects a diagonal neighbor', () => {
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 6, y: 6 })).toBe(false)
+  })
+
+  it('rejects a realistic portal-pair distance', () => {
+    expect(isAdjacent({ x: 5, y: 5 }, { x: 5, y: 15 })).toBe(false)
   })
 })
 

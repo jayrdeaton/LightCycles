@@ -82,6 +82,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     gap: 16,
+    maxWidth: 360,
     padding: 32
   },
   overlayTitle: { fontWeight: 'bold', marginBottom: -8 }

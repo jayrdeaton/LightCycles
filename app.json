@@ -4,8 +4,8 @@
     "slug": "LightCycles",
     "version": "1.0.0",
     "scheme": "lightcycles",
-    "description": "A local multiplayer Tron/lightcycles pass-and-play game",
-    "orientation": "default",
+    "description": "A local multiplayer Tron/lightcycles game",
+    "orientation": "portrait",
     "platforms": [
       "ios",
       "android",
@@ -26,7 +26,7 @@
     "icon": "./assets/images/dark-icon.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jayrdeaton.LightCycles",
+      "bundleIdentifier": "com.infinitetoken.LightCycles",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -36,7 +36,7 @@
       }
     },
     "android": {
-      "package": "com.jayrdeaton.lightcycles",
+      "package": "com.infinitetoken.lightcycles",
       "permissions": [
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.MODIFY_AUDIO_SETTINGS"
@@ -72,7 +72,8 @@
         }
       ],
       "expo-asset",
-      "./plugins/withDeferBottomEdgeGestures"
+      "./plugins/withDeferBottomEdgeGestures",
+      "./plugins/withPortraitOnlyIpad"
     ],
     "extra": {
       "router": {},

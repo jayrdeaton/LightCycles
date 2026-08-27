@@ -177,7 +177,7 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
 
   // Face-to-face: top/bottom split (player 1 = near/bottom zone, since player 1 is assumed to be
   // the device's owner and the near zone faces them; player 2 = far/top zone).
-  // Side-by-side (and web's shared layout): whichever player is on the right (see useP1OnRight)
+  // Side-by-side (and web's shared layout): whichever player is on the right (see useAccelerometerOrientation)
   // gets the right zone — matches GameBoard.tsx's identical wallPath split. Percentage-based (not
   // measured pixel) rects, unlike the old hitSlop approach, so no onLayout/size plumbing is needed
   // just to zone these two views.

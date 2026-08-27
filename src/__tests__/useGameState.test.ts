@@ -19,7 +19,7 @@ function installFakeRaf() {
   }
 }
 
-const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailSpeedTier: 'off', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [] }
+const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailSpeedTier: 'off', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [], arenaVariant: 'open', extendIntoSafeArea: false, wrapEdges: false }
 const CPU_SETTINGS: GameSettings = { ...SETTINGS, gameMode: 'vsCpu', cpuDifficulty: 'hard' }
 const COLORS = { 1: '#3B82F6', 2: '#EF4444' }
 const ORIENTATION = 'faceToFace'
@@ -83,6 +83,27 @@ describe('useGameState', () => {
     expect(classic.current.state.phase).toBe('playing')
     expect(fast.current.state.phase).toBe('playing')
     expect(fast.current.state.players[1].trail.length).toBeLessThan(classic.current.state.players[1].trail.length)
+  })
+
+  it('threads settings.arenaVariant through createInitialGameState into state.obstacles', async () => {
+    // 'small' cellPx against a real-phone-sized board clears both PILLAR/GAUNTLET arena minimums
+    // (see arenas.test.ts) — 'medium' at the 200x200 board every other test here uses does not.
+    const { result } = await renderHook(() => useGameState(390, 844, { ...SETTINGS, gridSizeTier: 'small', arenaVariant: 'pillars' }, COLORS, ORIENTATION, P1_ON_RIGHT))
+    expect(result.current.state.obstacles.length).toBeGreaterThan(0)
+  })
+
+  it('threads settings.arenaVariant through createInitialGameState into state.portals', async () => {
+    // Same clears-the-minimums reasoning as the obstacles case above — see arenas.test.ts's own
+    // PORTAL_MIN_ALONG_LENGTH/PORTAL_MIN_CROSS_LENGTH thresholds.
+    const { result } = await renderHook(() => useGameState(390, 844, { ...SETTINGS, gridSizeTier: 'small', arenaVariant: 'portals' }, COLORS, ORIENTATION, P1_ON_RIGHT))
+    expect(result.current.state.portals.length).toBeGreaterThan(0)
+  })
+
+  it('threads settings.arenaVariant through createInitialGameState into state.tunnels', async () => {
+    // Same clears-the-minimums reasoning as the obstacles/portals cases above — see arenas.test.ts's
+    // own TUNNEL_MIN_ALONG_LENGTH/TUNNEL_MIN_CROSS_LENGTH thresholds.
+    const { result } = await renderHook(() => useGameState(390, 844, { ...SETTINGS, gridSizeTier: 'small', arenaVariant: 'underpass' }, COLORS, ORIENTATION, P1_ON_RIGHT))
+    expect(result.current.state.tunnels.length).toBeGreaterThan(0)
   })
 
   it('applies the CPU turn in the same tick it is consumed, when gameMode is vsCpu', async () => {

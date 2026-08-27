@@ -9,7 +9,10 @@ const VALID = {
   trailSpeedTier: 'off',
   keyScheme: { 1: 'wasd', 2: 'arrows' },
   lockOrientation: false,
-  enabledPowerups: []
+  enabledPowerups: [],
+  arenaVariant: 'open',
+  extendIntoSafeArea: false,
+  wrapEdges: false
 }
 
 describe('isValidSettings', () => {
@@ -36,6 +39,9 @@ describe('isValidSettings', () => {
     for (const scheme of ['wasd', 'arrows', 'ijkl']) {
       expect(isValidSettings({ ...VALID, keyScheme: { 1: scheme, 2: scheme } })).toBe(true)
     }
+    for (const arenaVariant of ['open', 'pillars', 'gauntlet', 'portals', 'underpass']) {
+      expect(isValidSettings({ ...VALID, arenaVariant })).toBe(true)
+    }
   })
 
   it('rejects non-objects', () => {
@@ -57,6 +63,15 @@ describe('isValidSettings', () => {
 
     const { keyScheme: _keyScheme, ...missingKeyScheme } = VALID
     expect(isValidSettings(missingKeyScheme)).toBe(false)
+
+    const { arenaVariant: _arenaVariant, ...missingArenaVariant } = VALID
+    expect(isValidSettings(missingArenaVariant)).toBe(false)
+
+    const { extendIntoSafeArea: _extendIntoSafeArea, ...missingExtendIntoSafeArea } = VALID
+    expect(isValidSettings(missingExtendIntoSafeArea)).toBe(false)
+
+    const { wrapEdges: _wrapEdges, ...missingWrapEdges } = VALID
+    expect(isValidSettings(missingWrapEdges)).toBe(false)
   })
 
   it('rejects an object with an invalid enum value', () => {
@@ -66,6 +81,7 @@ describe('isValidSettings', () => {
     expect(isValidSettings({ ...VALID, gridSizeTier: 'huge' })).toBe(false)
     expect(isValidSettings({ ...VALID, trailSpeedTier: 'instant' })).toBe(false)
     expect(isValidSettings({ ...VALID, keyScheme: { 1: 'dvorak', 2: 'arrows' } })).toBe(false)
+    expect(isValidSettings({ ...VALID, arenaVariant: 'maze' })).toBe(false)
   })
 
   it('rejects a non-boolean speedRampEnabled', () => {
@@ -76,6 +92,16 @@ describe('isValidSettings', () => {
   it('rejects a non-boolean lockOrientation', () => {
     expect(isValidSettings({ ...VALID, lockOrientation: 'true' })).toBe(false)
     expect(isValidSettings({ ...VALID, lockOrientation: 1 })).toBe(false)
+  })
+
+  it('rejects a non-boolean extendIntoSafeArea', () => {
+    expect(isValidSettings({ ...VALID, extendIntoSafeArea: 'true' })).toBe(false)
+    expect(isValidSettings({ ...VALID, extendIntoSafeArea: 1 })).toBe(false)
+  })
+
+  it('rejects a non-boolean wrapEdges', () => {
+    expect(isValidSettings({ ...VALID, wrapEdges: 'true' })).toBe(false)
+    expect(isValidSettings({ ...VALID, wrapEdges: 1 })).toBe(false)
   })
 
   it('accepts a non-empty enabledPowerups list', () => {

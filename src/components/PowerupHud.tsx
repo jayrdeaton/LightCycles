@@ -2,10 +2,13 @@ import { StyleSheet, View } from 'react-native'
 import { Icon } from 'react-native-paper'
 
 import { POWERUP_ICONS } from '@/constants/game'
-import { Player, PlayerState } from '@/types'
+import { OrientationMode, Player, PlayerState } from '@/types'
 
 export interface PowerupHudProps {
   players: Record<Player, PlayerState>
+  orientationMode: OrientationMode
+  // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
+  p1OnRight: boolean
 }
 
 const BADGE_SIZE = 30
@@ -21,18 +24,21 @@ function HeldItemBadge({ heldPowerup }: { heldPowerup: PlayerState['heldPowerup'
 }
 
 // First persistent in-play overlay this screen has ever had (see game.tsx, where today nothing
-// shows during phase === 'playing'). Fixed corners — bottom-left for player 1, top-right for
-// player 2 — rather than adapting to orientationMode/p1OnRight: position alone already tells the
-// two apart, and top-right only ever coincides with the settings cog during 'onboarding'/
-// 'roundOver', phases this HUD is never shown in (see game.tsx's own gating), so there's no
-// runtime collision to guard against.
-export function PowerupHud({ players }: PowerupHudProps) {
+// shows during phase === 'playing'). Corner picked per player from orientationMode/p1OnRight —
+// same "is this player on the right" convention as GameBoard.tsx's wallPath and
+// TouchInputLayer.tsx's zone split — so each badge always sits in that player's own zone rather
+// than a side fixed regardless of which way the device was rotated. In faceToFace, column doesn't
+// matter (each player's zone spans the full width), so player 1 stays bottom and player 2 stays
+// top regardless of p1OnRight.
+export function PowerupHud({ players, orientationMode, p1OnRight }: PowerupHudProps) {
+  const p1OnRightSide = orientationMode === 'sideBySide' && p1OnRight
+  const p2OnLeftSide = orientationMode === 'sideBySide' && !p1OnRight
   return (
     <>
-      <View pointerEvents='none' style={styles.bottomLeft}>
+      <View pointerEvents='none' style={p1OnRightSide ? styles.bottomRight : styles.bottomLeft}>
         <HeldItemBadge heldPowerup={players[1].heldPowerup} />
       </View>
-      <View pointerEvents='none' style={styles.topRight}>
+      <View pointerEvents='none' style={p2OnLeftSide ? styles.topLeft : styles.topRight}>
         <HeldItemBadge heldPowerup={players[2].heldPowerup} />
       </View>
     </>
@@ -52,5 +58,7 @@ const styles = StyleSheet.create({
     width: BADGE_SIZE
   },
   bottomLeft: { bottom: 12, left: 12, position: 'absolute' },
+  bottomRight: { bottom: 12, position: 'absolute', right: 12 },
+  topLeft: { left: 12, position: 'absolute', top: 12 },
   topRight: { position: 'absolute', right: 12, top: 12 }
 })
