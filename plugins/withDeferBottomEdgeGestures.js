@@ -1,4 +1,4 @@
-const { withAppDelegate } = require('expo/config-plugins');
+const { withAppDelegate } = require('expo/config-plugins')
 
 // Swizzles UIViewController.preferredScreenEdgesDeferringSystemGestures so the
 // system defers bottom-edge gestures (Reachability, and incidentally the
@@ -26,49 +26,40 @@ extension UIViewController {
     .bottom
   }
 }
-`;
+`
 
-const IMPORT_ANCHOR = 'import ReactAppDependencyProvider';
+const IMPORT_ANCHOR = 'import ReactAppDependencyProvider'
 
 const START_REACT_NATIVE_ANCHOR = `    factory.startReactNative(
       withModuleName: "main",
       in: window,
-      launchOptions: launchOptions)`;
+      launchOptions: launchOptions)`
 
-const MARKER = 'lc_deferBottomEdgeSystemGesturesSwizzle';
+const MARKER = 'lc_deferBottomEdgeSystemGesturesSwizzle'
 
 function withDeferBottomEdgeGestures(config) {
   return withAppDelegate(config, (config) => {
     if (config.modResults.language !== 'swift') {
-      throw new Error(
-        `withDeferBottomEdgeGestures expects AppDelegate.swift, got language "${config.modResults.language}". ` +
-          'The Expo template likely changed — update this plugin to match.'
-      );
+      throw new Error(`withDeferBottomEdgeGestures expects AppDelegate.swift, got language "${config.modResults.language}". ` + 'The Expo template likely changed — update this plugin to match.')
     }
 
-    let contents = config.modResults.contents;
+    let contents = config.modResults.contents
 
     if (contents.includes(MARKER)) {
-      return config;
+      return config
     }
 
     if (!contents.includes(IMPORT_ANCHOR) || !contents.includes(START_REACT_NATIVE_ANCHOR)) {
-      throw new Error(
-        'withDeferBottomEdgeGestures could not find the expected imports or factory.startReactNative(...) ' +
-          'call in AppDelegate.swift. The Expo template likely changed — update this plugin to match.'
-      );
+      throw new Error('withDeferBottomEdgeGestures could not find the expected imports or factory.startReactNative(...) ' + 'call in AppDelegate.swift. The Expo template likely changed — update this plugin to match.')
     }
 
-    contents = contents.replace(IMPORT_ANCHOR, `${IMPORT_ANCHOR}\nimport ObjectiveC`);
-    contents = contents.replace(
-      START_REACT_NATIVE_ANCHOR,
-      `${START_REACT_NATIVE_ANCHOR}\n    _ = lc_deferBottomEdgeSystemGesturesSwizzle`
-    );
-    contents += SWIZZLE_SWIFT;
+    contents = contents.replace(IMPORT_ANCHOR, `${IMPORT_ANCHOR}\nimport ObjectiveC`)
+    contents = contents.replace(START_REACT_NATIVE_ANCHOR, `${START_REACT_NATIVE_ANCHOR}\n    _ = lc_deferBottomEdgeSystemGesturesSwizzle`)
+    contents += SWIZZLE_SWIFT
 
-    config.modResults.contents = contents;
-    return config;
-  });
+    config.modResults.contents = contents
+    return config
+  })
 }
 
-module.exports = withDeferBottomEdgeGestures;
+module.exports = withDeferBottomEdgeGestures

@@ -92,61 +92,70 @@ describe('buildArenaObstacles', () => {
   })
 
   // ─── Symmetry (pillars) ─────────────────────────────────────────────────────────────────────
-  // Hand-computed fixtures, sized to clear PILLAR_MIN_ALONG_LENGTH/PILLAR_MIN_CROSS_LENGTH but stay
-  // under PILLAR_DIAGONAL_MIN_ALONG_LENGTH/PILLAR_DIAGONAL_MIN_CROSS_LENGTH, so the result is
-  // exactly the two mirror pairs (no diagonal group) — same "exact coordinate" style as grid.test.ts's
-  // startingStateFor tests.
+  // Hand-computed fixtures, sized to comfortably clear PILLAR_MIN_ALONG_LENGTH/PILLAR_MIN_CROSS_LENGTH
+  // plus every pip's own clearance from spawn — same "exact coordinate" style as grid.test.ts's
+  // startingStateFor tests. The shipped generator is a quincunx: one center pip plus a near/far
+  // mirrored pair of corner pips, each pip a PILLAR_BLOCK_RADIUS_CELLS=1 (3x3) block — 5 pips * 9
+  // cells = 45 obstacle cells when every pip clears spawn (as it does at this fixture size).
   describe('pillar symmetry', () => {
-    it('produces two mirrored pairs, centered on the board, in faceToFace mode', () => {
-      // grid.cols=24, grid.rows=50 -> alongLength (rows)=50, crossLength (cols)=24: both comfortably
-      // between each variant's min and diagonal thresholds.
+    it('produces a center pip plus two mirrored corner-pip pairs, centered on the board, in faceToFace mode', () => {
+      // grid.cols=24, grid.rows=50 -> alongLength (rows)=50, crossLength (cols)=24.
       const grid = { cols: 24, rows: 50 }
       const obstacles = buildArenaObstacles('pillars', grid, 'faceToFace', true)
 
-      expect(obstacles).toHaveLength(4)
-      expect(obstacles).toEqual(
-        expect.arrayContaining([
-          { x: 12, y: 19 },
-          { x: 12, y: 31 },
-          { x: 7, y: 25 },
-          { x: 17, y: 25 }
-        ])
-      )
+      expect(obstacles).toHaveLength(45)
 
-      // The along-axis pair is mirrored around the board's along-center (y=25)...
-      const alongPair = obstacles.filter((c) => c.x === 12)
-      expect(alongPair).toHaveLength(2)
-      expect(alongPair[0].y + alongPair[1].y).toBe(50)
-      // ...and the cross-axis pair is mirrored around the board's cross-center (x=12), sharing the
-      // same along-coordinate as each other.
-      const crossPair = obstacles.filter((c) => c.y === 25)
-      expect(crossPair).toHaveLength(2)
-      expect(crossPair[0].x + crossPair[1].x).toBe(24)
+      // Each pip is a 3x3 block; group obstacle cells by which pip center they belong to.
+      const pipCenters = [
+        { x: 12, y: 25 }, // center pip
+        { x: 5, y: 15 }, // near pair
+        { x: 5, y: 35 },
+        { x: 19, y: 15 }, // far pair
+        { x: 19, y: 35 }
+      ]
+      for (const center of pipCenters) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            expect(obstacles).toContainEqual({ x: center.x + dx, y: center.y + dy })
+          }
+        }
+      }
+
+      // The near/far pip pairs are each mirrored around the board's along-center (y=25)...
+      expect(obstacles.filter((c) => c.x >= 4 && c.x <= 6 && c.y >= 14 && c.y <= 16)).toHaveLength(9)
+      expect(obstacles.filter((c) => c.x >= 4 && c.x <= 6 && c.y >= 34 && c.y <= 36)).toHaveLength(9)
+      // ...and around the board's cross-center (x=12), sharing the same along-coordinate as each other.
+      expect(obstacles.filter((c) => c.x >= 4 && c.x <= 6)).toHaveLength(18)
+      expect(obstacles.filter((c) => c.x >= 18 && c.x <= 20)).toHaveLength(18)
     })
 
-    it('produces two mirrored pairs, centered on the board, in sideBySide mode', () => {
+    it('produces a center pip plus two mirrored corner-pip pairs, centered on the board, in sideBySide mode', () => {
       // grid.cols=50, grid.rows=24 -> alongLength (cols)=50, crossLength (rows)=24 — the sideBySide
       // mirror of the fixture above, with p1OnRight flipped and mode swapped.
       const grid = { cols: 50, rows: 24 }
       const obstacles = buildArenaObstacles('pillars', grid, 'sideBySide', false)
 
-      expect(obstacles).toHaveLength(4)
-      expect(obstacles).toEqual(
-        expect.arrayContaining([
-          { x: 19, y: 12 },
-          { x: 31, y: 12 },
-          { x: 25, y: 7 },
-          { x: 25, y: 17 }
-        ])
-      )
+      expect(obstacles).toHaveLength(45)
 
-      const alongPair = obstacles.filter((c) => c.y === 12)
-      expect(alongPair).toHaveLength(2)
-      expect(alongPair[0].x + alongPair[1].x).toBe(50)
+      const pipCenters = [
+        { x: 25, y: 12 }, // center pip
+        { x: 15, y: 5 }, // near pair
+        { x: 35, y: 5 },
+        { x: 15, y: 19 }, // far pair
+        { x: 35, y: 19 }
+      ]
+      for (const center of pipCenters) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            expect(obstacles).toContainEqual({ x: center.x + dx, y: center.y + dy })
+          }
+        }
+      }
 
-      const crossPair = obstacles.filter((c) => c.x === 25)
-      expect(crossPair).toHaveLength(2)
-      expect(crossPair[0].y + crossPair[1].y).toBe(24)
+      expect(obstacles.filter((c) => c.y >= 4 && c.y <= 6 && c.x >= 14 && c.x <= 16)).toHaveLength(9)
+      expect(obstacles.filter((c) => c.y >= 4 && c.y <= 6 && c.x >= 34 && c.x <= 36)).toHaveLength(9)
+      expect(obstacles.filter((c) => c.y >= 4 && c.y <= 6)).toHaveLength(18)
+      expect(obstacles.filter((c) => c.y >= 18 && c.y <= 20)).toHaveLength(18)
     })
   })
 
@@ -170,9 +179,14 @@ describe('buildArenaObstacles', () => {
       const grid = { cols: 78, rows: 168 }
       const obstacles = buildArenaObstacles('gauntlet', grid, 'sideBySide', true)
       const positions = wallAlongPositions(obstacles, 'sideBySide')
-      const center = Math.floor(grid.cols / 2)
+      // The mirror axis is the real spawn heads' own sum (see buildGauntlet's axisSum), not
+      // Math.floor(grid.cols / 2) — the two aren't always equal (see "keeps each player equally
+      // many ticks..." below), and for this particular grid they differ by one.
+      const p1 = startingStateFor(1, grid, 'sideBySide', true)
+      const p2 = startingStateFor(2, grid, 'sideBySide', true)
+      const axisSum = p1.head.x + p2.head.x
       for (const position of positions) {
-        expect(positions).toContain(2 * center - position)
+        expect(positions).toContain(axisSum - position)
       }
     })
 

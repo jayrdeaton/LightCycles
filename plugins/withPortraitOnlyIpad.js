@@ -1,4 +1,4 @@
-const { withInfoPlist } = require('expo/config-plugins');
+const { withInfoPlist } = require('expo/config-plugins')
 
 // app.json's top-level "orientation": "portrait" only patches
 // UISupportedInterfaceOrientations (see @expo/config-plugins' own
@@ -13,9 +13,9 @@ const { withInfoPlist } = require('expo/config-plugins');
 // the iPad one so the lock is actually total.
 function withPortraitOnlyIpad(config) {
   return withInfoPlist(config, (config) => {
-    config.modResults['UISupportedInterfaceOrientations~ipad'] = ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown'];
-    return config;
-  });
+    config.modResults['UISupportedInterfaceOrientations~ipad'] = ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown']
+    return config
+  })
 }
 
-module.exports = withPortraitOnlyIpad;
+module.exports = withPortraitOnlyIpad

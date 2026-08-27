@@ -11,6 +11,7 @@
     "build:preview": "eas build --profile preview",
     "build:production": "eas build --profile production",
     "build:web": "expo export -p web",
+    "ci": "npm run lint && npm test && npm run typecheck",
     "client": "expo start --dev-client",
     "doctor": "expo install --fix && npx expo-doctor@latest",
     "fingerprint:compare": "eas fingerprint:compare",
@@ -30,8 +31,7 @@
     "update": "rific-bump-ota src/constants/release.ts && eas update",
     "update:development": "npm run update -- --branch development --environment development --message \"$(git log -1 --pretty=%B)\"",
     "update:preview": "npm run update -- --branch preview --environment preview --non-interactive --message \"$(git log -1 --pretty=%B)\"",
-    "update:production": "npm run update -- --branch production --environment production --non-interactive --message \"$(git log -1 --pretty=%B)\"",
-    "ci": "npm run lint && npm test && npm run typecheck"
+    "update:production": "npm run update -- --branch production --environment production --non-interactive --message \"$(git log -1 --pretty=%B)\""
   },
   "dependencies": {
     "@expo-google-fonts/orbitron": "^0.4.2",
@@ -41,12 +41,13 @@
     "@rific/feedback-press": "^0.10.7",
     "@rific/focus-chain": "^0.4.4",
     "@rific/splash-gate": "^0.2.1",
+    "@rific/toaster": "^0.6.1",
     "@rific/updater": "^0.4.1",
     "@shopify/react-native-skia": "2.6.2",
     "@tastic/core": "^0.1.3",
     "@tastic/hud": "^0.1.5",
     "@tastic/input": "^0.1.3",
-    "@tastic/profile": "^0.1.2",
+    "@tastic/profile": "^0.1.3",
     "@tastic/split-screen": "^0.2.1",
     "expo": "~57.0.17",
     "expo-asset": "~57.0.13",

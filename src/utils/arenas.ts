@@ -104,7 +104,13 @@ export const GAUNTLET_THREE_WALL_MIN_ALONG_LENGTH = 80
 // spawn) completely empty while overcomplicating the middle. Spreading across the full axis instead
 // pushes walls out toward each player's own territory (candidates too close to a spawn are simply
 // dropped — see buildGauntlet), using much more of the board rather than clustering in the middle.
-export const GAUNTLET_WALL_ALONG_FRACTIONS_TWO = [0.32, 0.68]
+// The two-wall fractions stay as close to each spawn (0.25/0.75) as GAUNTLET_SPAWN_CLEARANCE_CELLS
+// allows at GAUNTLET_MIN_ALONG_LENGTH itself (the tightest case): 0.32/0.68 sat only ~0.07*alongLength
+// from each spawn, which cleared the 6-cell minimum only once alongLength exceeded ~86 — past
+// GAUNTLET_THREE_WALL_MIN_ALONG_LENGTH, so the two-wall variant never actually produced a wall on any
+// grid that reaches it. 0.45/0.55 keeps a one-cell safety margin above the minimum across the whole
+// [GAUNTLET_MIN_ALONG_LENGTH, GAUNTLET_THREE_WALL_MIN_ALONG_LENGTH) range instead.
+export const GAUNTLET_WALL_ALONG_FRACTIONS_TWO = [0.45, 0.55]
 export const GAUNTLET_WALL_ALONG_FRACTIONS_THREE = [0.22, 0.5, 0.78]
 
 // Minimum split-axis distance a wall must keep from either spawn head, and from any
@@ -251,20 +257,38 @@ function buildGauntlet(grid: GridSize, mode: OrientationMode, p1Head: GridCell, 
     groups.push(i === j ? [fractions[i]] : [fractions[i], fractions[j]])
   }
 
+  // The axis both wall groups mirror around is the real midpoint between the two actual spawn
+  // heads (p1Along + p2Along), NOT Math.floor(alongLength / 2) — grid.ts's startingStateFor centers
+  // each player's own zone independently (two nested Math.floor calls per zone), which lands the
+  // pair exactly symmetric around (alongLength - 1) / 2 for some along-lengths and around
+  // alongLength / 2 for others, depending on alongLength's parity mod 4. A wall axis fixed at
+  // Math.floor(alongLength / 2) is therefore off by one cell from the real spawn-symmetry point for
+  // roughly a quarter of all grid sizes — invisible in isolation, but it left one player one tick
+  // closer to the nearest wall than the other on an otherwise-mirrored layout. Using the spawns' own
+  // sum sidesteps needing to know which case applies; it's simply always correct.
+  const axisSum = p1Along + p2Along
+
   for (const group of groups) {
     // A solo (unpaired) group is always the middle 0.5 fraction — the self-mirrored center wall in
-    // the three-wall layout. Route it through the same Math.floor(length / 2) axis-center
-    // convention buildPillars/buildTunnel already use rather than Math.round(alongLength * 0.5),
-    // which rounds a .5 up on an odd-length axis and lands the wall one cell off true center —
-    // invisible on its own, but it made the center wall sit one tick closer to one spawn than the
-    // other, the same kind of unfairness the pairing above just fixed for the outer walls.
-    const positions = group.length === 1 ? [Math.floor(alongLength / 2)] : group.map((fraction) => Math.round(alongLength * fraction))
-    const groupClear = positions.every(
-      (position) =>
-        Math.abs(position - p1Along) >= GAUNTLET_SPAWN_CLEARANCE_CELLS &&
-        Math.abs(position - p2Along) >= GAUNTLET_SPAWN_CLEARANCE_CELLS &&
-        acceptedPositions.every((accepted) => Math.abs(position - accepted) >= GAUNTLET_WALL_SPACING_CELLS)
-    )
+    // the three-wall layout. Centered on the real axisSum (see above) rather than assumed board
+    // geometry, so it sits equidistant between the two actual spawns.
+    //
+    // A paired group is derived as center ± offset, then mirrored via axisSum - position (not
+    // center + offset) — same construction buildPillars' alongCenter ± alongOffset already uses,
+    // extended to mirror around the real spawn axis exactly, no matter how axisSum's own parity
+    // rounds. Rounding each mirrored fraction independently instead (e.g. alongLength=50: 0.45->23,
+    // 0.55->28, not 27) would silently reintroduce the same one-wall-closer unfairness this guards
+    // against.
+    const axisCenter = Math.floor(axisSum / 2)
+    const positions =
+      group.length === 1
+        ? [axisCenter]
+        : (() => {
+            const offset = Math.round(alongLength * (group[1] - 0.5))
+            const position1 = axisCenter - offset
+            return [position1, axisSum - position1]
+          })()
+    const groupClear = positions.every((position) => Math.abs(position - p1Along) >= GAUNTLET_SPAWN_CLEARANCE_CELLS && Math.abs(position - p2Along) >= GAUNTLET_SPAWN_CLEARANCE_CELLS && acceptedPositions.every((accepted) => Math.abs(position - accepted) >= GAUNTLET_WALL_SPACING_CELLS))
     if (!groupClear) continue
 
     // Two permanently-open gaps per wall (not one) — per explicit user feedback that a single door

@@ -160,9 +160,9 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
     [enabled, orientationMode, handleTurn, handleActivate]
   )
 
-  const soloGesture = useMemo(() => (solo ? makePlayerGesture(humanPlayers[0], baseFor(humanPlayers[0]), lastDirectionFor(humanPlayers[0])) : null), [solo, humanPlayers, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps -- baseFor/lastDirectionFor read stable SharedValue refs (like useRef), not reactive state
-  const p1Gesture = useMemo(() => (solo ? null : makePlayerGesture(1, p1Base, p1LastDirection)), [solo, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps -- p1Base/p1LastDirection are stable SharedValue refs (like useRef), not reactive state
-  const p2Gesture = useMemo(() => (solo ? null : makePlayerGesture(2, p2Base, p2LastDirection)), [solo, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps -- p2Base/p2LastDirection are stable SharedValue refs (like useRef), not reactive state
+  const soloGesture = useMemo(() => (solo ? makePlayerGesture(humanPlayers[0], baseFor(humanPlayers[0]), lastDirectionFor(humanPlayers[0])) : null), [solo, humanPlayers, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/refs -- baseFor/lastDirectionFor read stable SharedValue refs (like useRef), not reactive state; SharedValue.value is only ever read inside worklet/event callbacks, never synchronously during render, despite the shape looking ref-like to this rule
+  const p1Gesture = useMemo(() => (solo ? null : makePlayerGesture(1, p1Base, p1LastDirection)), [solo, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/refs -- p1Base/p1LastDirection are stable SharedValue refs (like useRef), not reactive state; SharedValue.value is only ever read inside worklet/event callbacks, never synchronously during render
+  const p2Gesture = useMemo(() => (solo ? null : makePlayerGesture(2, p2Base, p2LastDirection)), [solo, makePlayerGesture]) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/refs -- p2Base/p2LastDirection are stable SharedValue refs (like useRef), not reactive state; SharedValue.value is only ever read inside worklet/event callbacks, never synchronously during render
 
   if (solo) {
     return (
