@@ -12,7 +12,8 @@ const VALID = {
   enabledPowerups: [],
   arenaVariant: 'open',
   extendIntoSafeArea: false,
-  wrapEdges: false
+  wrapEdges: false,
+  deferBottomEdgeGestures: false
 }
 
 describe('isValidSettings', () => {
@@ -72,6 +73,9 @@ describe('isValidSettings', () => {
 
     const { wrapEdges: _wrapEdges, ...missingWrapEdges } = VALID
     expect(isValidSettings(missingWrapEdges)).toBe(false)
+
+    const { deferBottomEdgeGestures: _deferBottomEdgeGestures, ...missingDeferBottomEdgeGestures } = VALID
+    expect(isValidSettings(missingDeferBottomEdgeGestures)).toBe(false)
   })
 
   it('rejects an object with an invalid enum value', () => {
@@ -102,6 +106,11 @@ describe('isValidSettings', () => {
   it('rejects a non-boolean wrapEdges', () => {
     expect(isValidSettings({ ...VALID, wrapEdges: 'true' })).toBe(false)
     expect(isValidSettings({ ...VALID, wrapEdges: 1 })).toBe(false)
+  })
+
+  it('rejects a non-boolean deferBottomEdgeGestures', () => {
+    expect(isValidSettings({ ...VALID, deferBottomEdgeGestures: 'true' })).toBe(false)
+    expect(isValidSettings({ ...VALID, deferBottomEdgeGestures: 1 })).toBe(false)
   })
 
   it('accepts a non-empty enabledPowerups list', () => {

@@ -16,7 +16,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   enabledPowerups: [],
   arenaVariant: 'open',
   extendIntoSafeArea: false,
-  wrapEdges: false
+  wrapEdges: false,
+  deferBottomEdgeGestures: false
 }
 
 function isValidKeyScheme(value: unknown): value is KeyScheme {
@@ -30,5 +31,5 @@ function isValidEnabledPowerups(value: unknown): value is PowerupType[] {
 export function isValidSettings(value: unknown): value is GameSettings {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<GameSettings>
-  return (v.speedTier === 'slow' || v.speedTier === 'normal' || v.speedTier === 'fast') && typeof v.speedRampEnabled === 'boolean' && (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.cpuDifficulty === 'easy' || v.cpuDifficulty === 'normal' || v.cpuDifficulty === 'hard') && (v.gridSizeTier === 'small' || v.gridSizeTier === 'medium' || v.gridSizeTier === 'large') && (v.trailSpeedTier === 'off' || v.trailSpeedTier === 'medium' || v.trailSpeedTier === 'fast') && !!v.keyScheme && isValidKeyScheme(v.keyScheme[1]) && isValidKeyScheme(v.keyScheme[2]) && typeof v.lockOrientation === 'boolean' && isValidEnabledPowerups(v.enabledPowerups) && (v.arenaVariant === 'open' || v.arenaVariant === 'pillars' || v.arenaVariant === 'gauntlet' || v.arenaVariant === 'portals' || v.arenaVariant === 'underpass') && typeof v.extendIntoSafeArea === 'boolean' && typeof v.wrapEdges === 'boolean'
+  return (v.speedTier === 'slow' || v.speedTier === 'normal' || v.speedTier === 'fast') && typeof v.speedRampEnabled === 'boolean' && (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.cpuDifficulty === 'easy' || v.cpuDifficulty === 'normal' || v.cpuDifficulty === 'hard') && (v.gridSizeTier === 'small' || v.gridSizeTier === 'medium' || v.gridSizeTier === 'large') && (v.trailSpeedTier === 'off' || v.trailSpeedTier === 'medium' || v.trailSpeedTier === 'fast') && !!v.keyScheme && isValidKeyScheme(v.keyScheme[1]) && isValidKeyScheme(v.keyScheme[2]) && typeof v.lockOrientation === 'boolean' && isValidEnabledPowerups(v.enabledPowerups) && (v.arenaVariant === 'open' || v.arenaVariant === 'pillars' || v.arenaVariant === 'gauntlet' || v.arenaVariant === 'portals' || v.arenaVariant === 'underpass') && typeof v.extendIntoSafeArea === 'boolean' && typeof v.wrapEdges === 'boolean' && typeof v.deferBottomEdgeGestures === 'boolean'
 }

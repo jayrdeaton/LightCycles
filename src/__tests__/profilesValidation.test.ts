@@ -1,4 +1,4 @@
-import { DEFAULT_PROFILES_STATE, isValidProfile, isValidProfilesState, isValidTag, MAX_PROFILE_NAME_LENGTH, MAX_TAG_LENGTH } from '@/utils/profilesValidation'
+import { DEFAULT_LOCAL_PROFILES_STATE, isValidLocalProfilesState, isValidProfile, isValidTag, MAX_PROFILE_NAME_LENGTH, MAX_TAG_LENGTH, migrateLegacyProfilesState } from '@/utils/profilesValidation'
 
 const VALID_PROFILE = {
   id: 'profile-1',
@@ -103,40 +103,65 @@ describe('isValidTag', () => {
   })
 })
 
-describe('isValidProfilesState', () => {
-  it('accepts DEFAULT_PROFILES_STATE', () => {
-    expect(isValidProfilesState(DEFAULT_PROFILES_STATE)).toBe(true)
+const { keyScheme: BASE_ONLY_KEY_SCHEME, ...VALID_BASE_PROFILE } = VALID_PROFILE
+void BASE_ONLY_KEY_SCHEME
+
+describe('isValidLocalProfilesState', () => {
+  it('accepts DEFAULT_LOCAL_PROFILES_STATE', () => {
+    expect(isValidLocalProfilesState(DEFAULT_LOCAL_PROFILES_STATE)).toBe(true)
   })
 
-  it('accepts a populated roster with a selection', () => {
-    const populated = { profiles: [VALID_PROFILE], lastSelected: { 1: 'profile-1', 2: null } }
-    expect(isValidProfilesState(populated)).toBe(true)
+  it('accepts a populated roster with a selection and an extension', () => {
+    const populated = { localBase: [VALID_BASE_PROFILE], extensions: { 'profile-1': { keyScheme: 'wasd' } }, lastSelected: { 1: 'profile-1', 2: null } }
+    expect(isValidLocalProfilesState(populated)).toBe(true)
   })
 
   it('rejects non-objects', () => {
-    expect(isValidProfilesState(null)).toBe(false)
-    expect(isValidProfilesState(undefined)).toBe(false)
-    expect(isValidProfilesState('profiles')).toBe(false)
+    expect(isValidLocalProfilesState(null)).toBe(false)
+    expect(isValidLocalProfilesState(undefined)).toBe(false)
+    expect(isValidLocalProfilesState('profiles')).toBe(false)
   })
 
-  it('rejects a non-array profiles field', () => {
-    expect(isValidProfilesState({ ...DEFAULT_PROFILES_STATE, profiles: {} })).toBe(false)
+  it('rejects a non-array localBase field', () => {
+    expect(isValidLocalProfilesState({ ...DEFAULT_LOCAL_PROFILES_STATE, localBase: {} })).toBe(false)
   })
 
-  it('rejects a roster containing one malformed profile — whole state invalid', () => {
-    const malformed = { profiles: [VALID_PROFILE, { ...VALID_PROFILE, id: '', name: 'Bob' }], lastSelected: { 1: null, 2: null } }
-    expect(isValidProfilesState(malformed)).toBe(false)
+  it('rejects a roster containing one malformed base profile — whole state invalid', () => {
+    const malformed = { ...DEFAULT_LOCAL_PROFILES_STATE, localBase: [VALID_BASE_PROFILE, { ...VALID_BASE_PROFILE, id: '', name: 'Bob' }] }
+    expect(isValidLocalProfilesState(malformed)).toBe(false)
+  })
+
+  it('rejects a malformed extensions entry — whole state invalid', () => {
+    const malformed = { ...DEFAULT_LOCAL_PROFILES_STATE, extensions: { 'profile-1': { keyScheme: 'dvorak' } } }
+    expect(isValidLocalProfilesState(malformed)).toBe(false)
   })
 
   it('rejects missing or malformed lastSelected', () => {
-    const { lastSelected: _lastSelected, ...missingLastSelected } = DEFAULT_PROFILES_STATE
-    expect(isValidProfilesState(missingLastSelected)).toBe(false)
-    expect(isValidProfilesState({ ...DEFAULT_PROFILES_STATE, lastSelected: { 1: 42, 2: null } })).toBe(false)
+    const { lastSelected: _lastSelected, ...missingLastSelected } = DEFAULT_LOCAL_PROFILES_STATE
+    expect(isValidLocalProfilesState(missingLastSelected)).toBe(false)
+    expect(isValidLocalProfilesState({ ...DEFAULT_LOCAL_PROFILES_STATE, lastSelected: { 1: 42, 2: null } })).toBe(false)
   })
 
   it('accepts a lastSelected id that does not (yet) match any saved profile', () => {
     // Validation doesn't cross-check lastSelected against the roster — a stale/deleted id is
     // handled by lobby.tsx resolving it to Guest at read time, not by rejecting the whole blob.
-    expect(isValidProfilesState({ profiles: [], lastSelected: { 1: 'deleted-id', 2: null } })).toBe(true)
+    expect(isValidLocalProfilesState({ localBase: [], extensions: {}, lastSelected: { 1: 'deleted-id', 2: null } })).toBe(true)
+  })
+})
+
+describe('migrateLegacyProfilesState', () => {
+  it('splits a legacy full-profile blob into base fields + extensions', () => {
+    const legacy = { profiles: [VALID_PROFILE], lastSelected: { 1: 'profile-1', 2: null } }
+    expect(migrateLegacyProfilesState(legacy)).toEqual({
+      localBase: [VALID_BASE_PROFILE],
+      extensions: { 'profile-1': { keyScheme: 'wasd' } },
+      lastSelected: { 1: 'profile-1', 2: null }
+    })
+  })
+
+  it('returns null for a blob that is neither legacy nor current-shape', () => {
+    expect(migrateLegacyProfilesState({ profiles: [{ ...VALID_PROFILE, keyScheme: undefined }], lastSelected: { 1: null, 2: null } })).toBeNull()
+    expect(migrateLegacyProfilesState(null)).toBeNull()
+    expect(migrateLegacyProfilesState(DEFAULT_LOCAL_PROFILES_STATE)).toBeNull()
   })
 })

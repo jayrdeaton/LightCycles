@@ -161,6 +161,12 @@ export interface GameSettings {
   // bounds check). GameBoard.tsx's boundary outline is hidden whenever this is on, since edges
   // stop being fatal.
   wrapEdges: boolean
+  // iOS-only. Off by default — deliberately opt-in rather than always-on, so it only kicks in for
+  // someone who's actually hit the problem and gone looking for a fix, instead of every player
+  // eating a "swipe twice to go home" surprise from day one. Mirrored into native UserDefaults (see
+  // useGameSettings.tsx) for plugins/withDeferBottomEdgeGestures.js's swizzled
+  // preferredScreenEdgesDeferringSystemGestures to read at runtime.
+  deferBottomEdgeGestures: boolean
 }
 
 export interface GameState {

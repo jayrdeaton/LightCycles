@@ -1,10 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { isSharedProfileStoreAvailable, loadSharedProfiles, Profile as BaseProfile, saveSharedProfiles } from '@tastic/profile'
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
 
 import { KeyScheme, Player, Profile } from '@/types'
-import { DEFAULT_PROFILES_STATE, isValidProfilesState, SavedProfilesState } from '@/utils/profilesValidation'
+import { DEFAULT_LOCAL_PROFILES_STATE, isValidLocalProfilesState, LocalProfilesState, migrateLegacyProfilesState } from '@/utils/profilesValidation'
 
 const STORAGE_KEY = 'lightcycles.profiles'
+// Same group id LightCycles and BoxHockey both declare in app.json's ios.entitlements (and any
+// future @tastic game that wants into the same shared roster) — see @tastic/profile's own README
+// for why only the BASE identity fields travel through this, never keyScheme.
+const SHARED_GROUP_ID = 'group.com.infinitetoken.tastic'
+// Matches DEFAULT_SETTINGS.keyScheme's own neutral default (see gameSettingsValidation.ts and
+// app/profiles.tsx's own NEW_PROFILE_KEY_SCHEME) — what a profile that's never had one set locally
+// on THIS app falls back to. That's exactly the state of any profile created on another @tastic app
+// (BoxHockey has no concept of keyScheme at all) the very first time it's selected here.
+const DEFAULT_KEY_SCHEME: KeyScheme = 'wasd'
 
 interface CreateProfileInput {
   name: string
@@ -37,69 +47,134 @@ function generateProfileId(): string {
 // Single source of truth for saved player profiles, mounted once in _layout.tsx — same
 // single-Provider rationale as useGameSettings.tsx/useGameStats.tsx (expo-router keeps prior
 // screens mounted, so a per-screen AsyncStorage-backed copy could go stale or clobber a concurrent
-// update). Deliberately doesn't import Theme/@rific/auto-paper or touch color/theme state at all —
-// selecting a profile here only ever writes `lastSelected`; the "pre-fill the seat's color"
-// behavior lives one layer up, in lobby.tsx/LobbyPlayerPanel.tsx. Keeping this hook free of any
-// LightCycles-specific theme coupling is what keeps a future @tastic/profile extraction low-friction.
+// update).
+//
+// Base identity fields (name/color/tag) are shared with every other @tastic game declaring the same
+// App Group entitlement (see SHARED_GROUP_ID and @tastic/profile's own loadSharedProfiles/
+// saveSharedProfiles) — create a profile in BoxHockey, it shows up here too, and vice versa.
+// keyScheme is LightCycles-specific (BoxHockey's analogous field is controlScheme) and deliberately
+// does NOT travel through that shared store — it's kept entirely in this app's own local
+// `extensions` table (see LocalProfilesState in profilesValidation.ts), keyed by profile id, and
+// merged onto the shared base roster in the `profiles` getter below, falling back to
+// DEFAULT_KEY_SCHEME the first time a profile created on another app shows up here.
+// isSharedProfileStoreAvailable is false on Android/web and on any iOS build that hasn't run
+// `expo prebuild` since the entitlement was added — `local.localBase` (only ever read/written in
+// that case) keeps this screen fully usable there too, just without cross-app sharing.
 export function ProfilesProvider({ children }: Props) {
-  const [state, setState] = useState<SavedProfilesState>(DEFAULT_PROFILES_STATE)
+  const [local, setLocal] = useState<LocalProfilesState>(DEFAULT_LOCAL_PROFILES_STATE)
+  // null until the initial load below resolves — distinguishes "still loading" from "loaded, and
+  // genuinely empty," which matters for the one-time seed-from-local migration in that same effect.
+  const [sharedBase, setSharedBase] = useState<BaseProfile[] | null>(null)
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (!stored) return
-        try {
-          const parsed = JSON.parse(stored)
-          if (isValidProfilesState(parsed)) setState(parsed)
-        } catch {
-          // Corrupt/stale blob — keep defaults.
+    let cancelled = false
+    ;(async () => {
+      let stored = DEFAULT_LOCAL_PROFILES_STATE
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          stored = isValidLocalProfilesState(parsed) ? parsed : (migrateLegacyProfilesState(parsed) ?? DEFAULT_LOCAL_PROFILES_STATE)
         }
-      })
-      .catch(() => {
-        // Unavailable storage — DEFAULT_PROFILES_STATE already in state is a complete, silent
-        // fallback, same as useGameSettings.tsx.
-      })
-  }, [])
-
-  const createProfile = useCallback((input: CreateProfileInput) => {
-    const now = Date.now()
-    const profile: Profile = { id: generateProfileId(), name: input.name, color: input.color, tag: input.tag, keyScheme: input.keyScheme, createdAt: now, updatedAt: now }
-    setState((prev) => {
-      const next = { ...prev, profiles: [...prev.profiles, profile] }
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
-      return next
-    })
-    return profile
-  }, [])
-
-  const updateProfile = useCallback((id: string, patch: Partial<CreateProfileInput>) => {
-    setState((prev) => {
-      const next = { ...prev, profiles: prev.profiles.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)) }
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
-      return next
-    })
-  }, [])
-
-  const deleteProfile = useCallback((id: string) => {
-    setState((prev) => {
-      const next: SavedProfilesState = {
-        profiles: prev.profiles.filter((p) => p.id !== id),
-        lastSelected: { 1: prev.lastSelected[1] === id ? null : prev.lastSelected[1], 2: prev.lastSelected[2] === id ? null : prev.lastSelected[2] }
+      } catch {
+        // Corrupt/stale blob or unavailable storage — DEFAULT_LOCAL_PROFILES_STATE is a complete,
+        // silent fallback, same as useGameSettings.tsx.
       }
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
-      return next
-    })
+      if (cancelled) return
+      setLocal(stored)
+
+      if (!isSharedProfileStoreAvailable) {
+        setSharedBase(stored.localBase)
+        return
+      }
+      const shared = await loadSharedProfiles(SHARED_GROUP_ID)
+      if (cancelled) return
+      // First time this build has ever seen the shared store (a fresh install, or an existing
+      // install's first launch after this feature shipped): seed it from whatever this app already
+      // had saved locally, so an upgrading user's own profiles don't just vanish because nothing's
+      // been written to the shared side yet. Only when the shared roster is still completely empty
+      // — once ANYTHING has been shared (by this app or another), that always wins over a stale
+      // local snapshot, never merged with it (avoids resurrecting a profile deleted elsewhere).
+      const seeded = shared.length === 0 && stored.localBase.length > 0 ? stored.localBase : shared
+      if (seeded !== shared) saveSharedProfiles(SHARED_GROUP_ID, seeded).catch(() => {})
+      setSharedBase(seeded)
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const selectProfile = useCallback((seat: Player, profileId: string | null) => {
-    setState((prev) => {
-      const next = { ...prev, lastSelected: { ...prev.lastSelected, [seat]: profileId } }
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
-      return next
-    })
+  const persistLocal = useCallback((next: LocalProfilesState) => {
+    setLocal(next)
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
   }, [])
 
-  return <ProfilesContext.Provider value={{ profiles: state.profiles, lastSelected: state.lastSelected, createProfile, updateProfile, deleteProfile, selectProfile }}>{children}</ProfilesContext.Provider>
+  // Writes the base roster to whichever store is authoritative — the shared App Group roster when
+  // available, this app's own local `localBase` fallback otherwise — and always updates the
+  // in-memory sharedBase, which is the merge source for `profiles` below regardless of which
+  // backend it actually came from.
+  const persistBase = useCallback(
+    (next: BaseProfile[]) => {
+      setSharedBase(next)
+      if (isSharedProfileStoreAvailable) saveSharedProfiles(SHARED_GROUP_ID, next).catch(() => {})
+      else persistLocal({ ...local, localBase: next })
+    },
+    [local, persistLocal]
+  )
+
+  const createProfile = useCallback(
+    (input: CreateProfileInput) => {
+      const now = Date.now()
+      const profile: Profile = { id: generateProfileId(), name: input.name, color: input.color, tag: input.tag, keyScheme: input.keyScheme, createdAt: now, updatedAt: now }
+      persistBase([...(sharedBase ?? []), { id: profile.id, name: profile.name, color: profile.color, tag: profile.tag, createdAt: now, updatedAt: now }])
+      persistLocal({ ...local, extensions: { ...local.extensions, [profile.id]: { keyScheme: input.keyScheme } } })
+      return profile
+    },
+    [sharedBase, local, persistBase, persistLocal]
+  )
+
+  const updateProfile = useCallback(
+    (id: string, patch: Partial<CreateProfileInput>) => {
+      // Routed to whichever store actually owns each field — name/color/tag to the (possibly
+      // shared) base roster, keyScheme to this app's own local extension table. A single call can
+      // touch both (see ProfilesManager's onSave, which always patches all three base fields at
+      // once) or just one (lobby.tsx's own handleP1KeySchemeChange sync-back, patch-of-one).
+      const { keyScheme, ...baseChanges } = patch
+      if (Object.keys(baseChanges).length > 0) {
+        const base = sharedBase ?? []
+        persistBase(base.map((p) => (p.id === id ? { ...p, ...baseChanges, updatedAt: Date.now() } : p)))
+      }
+      if (keyScheme !== undefined) {
+        persistLocal({ ...local, extensions: { ...local.extensions, [id]: { keyScheme } } })
+      }
+    },
+    [sharedBase, local, persistBase, persistLocal]
+  )
+
+  const deleteProfile = useCallback(
+    (id: string) => {
+      persistBase((sharedBase ?? []).filter((p) => p.id !== id))
+      const extensions = { ...local.extensions }
+      delete extensions[id]
+      persistLocal({
+        ...local,
+        extensions,
+        lastSelected: { 1: local.lastSelected[1] === id ? null : local.lastSelected[1], 2: local.lastSelected[2] === id ? null : local.lastSelected[2] }
+      })
+    },
+    [sharedBase, local, persistBase, persistLocal]
+  )
+
+  const selectProfile = useCallback(
+    (seat: Player, profileId: string | null) => {
+      persistLocal({ ...local, lastSelected: { ...local.lastSelected, [seat]: profileId } })
+    },
+    [local, persistLocal]
+  )
+
+  const profiles: Profile[] = (sharedBase ?? []).map((p) => ({ ...p, keyScheme: local.extensions[p.id]?.keyScheme ?? DEFAULT_KEY_SCHEME }))
+
+  return <ProfilesContext.Provider value={{ profiles, lastSelected: local.lastSelected, createProfile, updateProfile, deleteProfile, selectProfile }}>{children}</ProfilesContext.Provider>
 }
 
 export function useProfiles() {

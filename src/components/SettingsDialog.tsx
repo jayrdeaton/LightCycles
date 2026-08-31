@@ -97,6 +97,26 @@ export function SettingsDialog({ visible, onDismiss, settings, setSettings, rota
                 </View>
               </TouchableRipple>
 
+              {/* iOS only — mirrors into UserDefaults for plugins/withDeferBottomEdgeGestures.js's
+                swizzle to read (see useGameSettings.tsx). Off by default: a deliberate opt-in for
+                whoever's actually hit the "swipe up near the bottom fires app-switch mid-game"
+                problem and come looking for a fix, not a surprise every player gets by default. */}
+              {Platform.OS === 'ios' && (
+                <TouchableRipple onPress={() => setSettings({ deferBottomEdgeGestures: !settings.deferBottomEdgeGestures })} style={styles.toggleButton} accessibilityLabel={`Bottom edge guard ${settings.deferBottomEdgeGestures ? 'on' : 'off'}`}>
+                  <View style={styles.toggleContent}>
+                    <SettingIcon source={settings.deferBottomEdgeGestures ? 'shield-check-outline' : 'shield-off-outline'} color={settings.deferBottomEdgeGestures ? colors.secondary : colors.onSurfaceVariant} containerColor={settings.deferBottomEdgeGestures ? colors.secondaryContainer : colors.surfaceVariant} />
+                    <View style={styles.flexShrink}>
+                      <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                        Bottom Edge Guard
+                      </Text>
+                      <Text variant='bodySmall' numberOfLines={1} style={{ color: colors.onSurfaceVariant }}>
+                        Needs a second swipe near the edge
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableRipple>
+              )}
+
               {/* Side by side, not stacked — neither needs a full row's width (single-line label,
                 no description under it the way Lock Orientation has), so sharing one row reads
                 just as clearly and takes half the vertical space. toggleRow carries the same

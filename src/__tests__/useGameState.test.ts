@@ -19,7 +19,7 @@ function installFakeRaf() {
   }
 }
 
-const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailSpeedTier: 'off', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [], arenaVariant: 'open', extendIntoSafeArea: false, wrapEdges: false }
+const SETTINGS: GameSettings = { speedTier: 'fast', speedRampEnabled: false, gameMode: 'twoPlayer', cpuDifficulty: 'normal', gridSizeTier: 'medium', trailSpeedTier: 'off', keyScheme: { 1: 'wasd', 2: 'arrows' }, lockOrientation: false, enabledPowerups: [], arenaVariant: 'open', extendIntoSafeArea: false, wrapEdges: false, deferBottomEdgeGestures: false }
 const CPU_SETTINGS: GameSettings = { ...SETTINGS, gameMode: 'vsCpu', cpuDifficulty: 'hard' }
 const COLORS = { 1: '#3B82F6', 2: '#EF4444' }
 const ORIENTATION = 'faceToFace'
