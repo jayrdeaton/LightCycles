@@ -15,6 +15,13 @@ export const GRID_CELL_PX: Record<GridSizeTier, number> = {
 
 export const DEFAULT_GRID_SIZE_TIER: GridSizeTier = 'medium'
 
+// Caps the board's own width via @tastic/core's computeContentBounds (see game.tsx) whenever
+// extendIntoSafeArea is off — real phones/tablets in portrait (the match's permanently-locked
+// orientation, see GameScreen's own comment) stay well under this and see gutterWidth === 0; it
+// only actually kicks in on a maximized desktop-web window, where nothing else stops the board
+// from stretching into an unplayably wide, short rectangle.
+export const MAX_BOARD_CONTENT_WIDTH = 1000
+
 // Every ms-per-tick constant below is tuned at GRID_CELL_PX.medium (this app's original fixed
 // CELL_SIZE) — see scaleMsForCellPx, which rescales them to whichever tier is actually active so
 // the cycle's on-screen (px/sec) pace stays constant across grid-size tiers instead of silently

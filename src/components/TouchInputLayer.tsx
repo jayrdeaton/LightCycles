@@ -7,6 +7,7 @@ import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated'
 
 import { useGameSound } from '@/hooks/useGameSound'
 import { Direction, KeyScheme, OrientationMode, Player } from '@/types'
+import { zoneSideFor } from '@/utils/playerZones'
 import { resolveTurnIntent, TAP_MAX_DISTANCE } from '@/utils/turnIntent'
 
 export interface TouchInputLayerProps {
@@ -175,15 +176,12 @@ export default function TouchInputLayer({ orientationMode, p1OnRight, humanPlaye
     )
   }
 
-  // Face-to-face: top/bottom split (player 1 = near/bottom zone, since player 1 is assumed to be
-  // the device's owner and the near zone faces them; player 2 = far/top zone).
-  // Side-by-side (and web's shared layout): whichever player is on the right (see useAccelerometerOrientation)
-  // gets the right zone — matches GameBoard.tsx's identical wallPath split. Percentage-based (not
-  // measured pixel) rects, unlike the old hitSlop approach, so no onLayout/size plumbing is needed
-  // just to zone these two views.
-  const isFaceToFace = orientationMode === 'faceToFace'
-  const p1ZoneStyle = isFaceToFace ? styles.zoneBottom : p1OnRight ? styles.zoneRight : styles.zoneLeft
-  const p2ZoneStyle = isFaceToFace ? styles.zoneTop : p1OnRight ? styles.zoneLeft : styles.zoneRight
+  // Percentage-based (not measured pixel) rects, unlike the old hitSlop approach, so no
+  // onLayout/size plumbing is needed just to zone these two views. Which player owns which side —
+  // see zoneSideFor's own comment.
+  const zoneStyles = { top: styles.zoneTop, bottom: styles.zoneBottom, left: styles.zoneLeft, right: styles.zoneRight }
+  const p1ZoneStyle = zoneStyles[zoneSideFor(1, orientationMode, p1OnRight)]
+  const p2ZoneStyle = zoneStyles[zoneSideFor(2, orientationMode, p1OnRight)]
 
   return (
     <View style={StyleSheet.absoluteFill}>

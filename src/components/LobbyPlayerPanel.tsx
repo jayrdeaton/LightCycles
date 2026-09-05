@@ -1,11 +1,11 @@
 import { SeedColor } from '@rific/auto-paper'
 import { useIsTouchPrimaryDevice } from '@tastic/core'
-import { InlineColorPicker, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
+import { getLabeledDropdownContentHeight, InlineColorPicker, LABELED_DROPDOWN_POPOVER_WIDTH, LabeledDropdown, LabeledDropdownOption, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { ProfilePicker } from '@tastic/profile'
 import { useCallback } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 
-import { LabeledDropdown, LabeledDropdownOption } from '@/components/LabeledDropdown'
+import { useZoneClampedAlign } from '@/hooks/useZoneClampedAlign'
 import { CpuDifficulty, KeyScheme, Profile } from '@/types'
 
 export const KEY_SCHEME_OPTIONS: { value: KeyScheme; label: string }[] = [
@@ -34,6 +34,12 @@ export interface LobbyPlayerPanelProps {
   isHuman: boolean
   keyScheme?: KeyScheme
   onKeySchemeChange?: (scheme: KeyScheme) => void
+  // The other player's current key scheme, if any — passed straight through as SectionedDropdown's
+  // takenValue so it stays in the options list (rather than filtered out) but renders disabled.
+  // Keeping it in the list is what lets the trigger gauge show each seat's true position among all
+  // three schemes, instead of both seats' gauges landing on whichever index their own filtered-down
+  // list happened to produce (see takenColor above for the identical "shown, not removed" reasoning
+  // applied to color).
   otherKeyScheme?: KeyScheme
   ready?: boolean
   onToggleReady?: () => void
@@ -79,28 +85,37 @@ export interface LobbyPlayerPanelProps {
 export function LobbyPlayerPanel({ idPrefix, host, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, keyScheme, onKeySchemeChange, otherKeyScheme, ready, onToggleReady, dark, showReadyButton = true, profiles, selectedProfileId, takenProfileId, guestLabel, onProfileSelect, onManageProfiles, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange }: LobbyPlayerPanelProps) {
   const ownHost = usePopoverHost()
   const popover = host ?? ownHost
+  // Zone-aware placement for the CPU-difficulty popover specifically (see useZoneClampedAlign's own
+  // doc for why a popover living inside a @tastic/split-screen zone needs this instead of
+  // LabeledDropdown's own plain default) — called unconditionally, with a safe closed/empty state
+  // when this panel isn't actually showing a CPU seat right now (isHuman, or cpuDifficultyOptions
+  // not yet provided), same as every other conditionally-relevant value in this component.
+  // LABELED_DROPDOWN_POPOVER_WIDTH/getLabeledDropdownContentHeight mirror LabeledDropdown's own
+  // internal sizing exactly, so this hook measures against the same dimensions that component will
+  // actually render at.
+  const cpuDifficultyId = `${idPrefix}-difficulty`
+  const cpuDifficultyOpen = popover.openId === cpuDifficultyId
+  const cpuDifficultyAlign = useZoneClampedAlign(cpuDifficultyOpen, LABELED_DROPDOWN_POPOVER_WIDTH, getLabeledDropdownContentHeight(cpuDifficultyOptions?.length ?? 0))
   const isTouchPrimary = useIsTouchPrimaryDevice()
-  const keySchemeOptions = otherKeyScheme ? KEY_SCHEME_OPTIONS.filter((o) => o.value !== otherKeyScheme) : KEY_SCHEME_OPTIONS
   // Key scheme has no meaning on a swipe-controlled touch device.
   const showKeyScheme = Platform.OS === 'web' && !isTouchPrimary
   // The color button's own tag display (see InlineColorPicker) — read live from the selected
   // profile rather than snapshotted at selection time, since there's no other editing surface for
   // it on this screen at all (see ProfilesManager for the only place a tag is actually typed).
   const selectedProfile = profiles?.find((p) => p.id === selectedProfileId) ?? null
-  // Pre-fills the seat's own color/key scheme from the selected profile, once, at selection time.
-  // This is what actually makes the seat's own pickers *feel* like "this profile's settings" — they
-  // stay fully editable afterward (see lobby.tsx's sync-back-while-selected key-scheme handler; see
-  // this component's own doc for why color specifically does not sync back), so this is just the
-  // initial snap, not a one-time-only copy.
+  // Pre-fills the seat's own key scheme from the selected profile, once, at selection time — stays
+  // fully editable afterward (see lobby.tsx's sync-back-while-selected key-scheme handler). Color
+  // does NOT get pre-filled here: lobby.tsx's own mount/reapply effect already re-derives a seat's
+  // color from whichever profile (or guest/CPU slot) ends up selected — including a fresh tap-select
+  // right here — the moment lastSelected itself actually updates, so doing it here too would just
+  // read this callback's own stale pre-selection closure and risk misfiling the outgoing color as a
+  // guest/CPU one (see lobby.tsx's handleP1ColorChange/handleP2ColorChange's own doc).
   const handleProfileSelect = useCallback(
     (profile: Profile | null) => {
       onProfileSelect?.(profile)
-      if (profile) {
-        onColorChange(profile.color)
-        onKeySchemeChange?.(profile.keyScheme)
-      }
+      if (profile) onKeySchemeChange?.(profile.keyScheme)
     },
-    [onProfileSelect, onColorChange, onKeySchemeChange]
+    [onProfileSelect, onKeySchemeChange]
   )
   const mutedColor = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
   // Checking *this panel's own* ids, not just "is anything open on the host" — when `host` is
@@ -126,7 +141,7 @@ export function LobbyPlayerPanel({ idPrefix, host, color, onColorChange, swatche
       "who's actually playing" either way, just a saved identity for a human seat versus which
       opponent you're facing for the CPU's. LabeledDropdown self-elevates the same way ProfilePicker
       does, for the same reason. */}
-      {isHuman ? profiles !== undefined && onProfileSelect && <ProfilePicker idPrefix={idPrefix} host={popover} profiles={profiles} selectedId={selectedProfileId ?? null} takenId={takenProfileId} color={color} dark={dark} guestLabel={guestLabel ?? 'GUEST'} onSelect={handleProfileSelect} onManage={onManageProfiles} /> : cpuDifficulty !== undefined && cpuDifficultyOptions && onCpuDifficultyChange && <LabeledDropdown id={`${idPrefix}-difficulty`} host={popover} options={cpuDifficultyOptions} value={cpuDifficulty} onChange={onCpuDifficultyChange} color={color} dark={dark} />}
+      {isHuman ? profiles !== undefined && onProfileSelect && <ProfilePicker idPrefix={idPrefix} host={popover} profiles={profiles} selectedId={selectedProfileId ?? null} takenId={takenProfileId} color={color} dark={dark} guestLabel={guestLabel ?? 'GUEST'} onSelect={handleProfileSelect} onManage={onManageProfiles} /> : cpuDifficulty !== undefined && cpuDifficultyOptions && onCpuDifficultyChange && <LabeledDropdown id={cpuDifficultyId} host={popover} options={cpuDifficultyOptions} value={cpuDifficulty} onChange={onCpuDifficultyChange} color={color} dark={dark} alignOverride={cpuDifficultyAlign} />}
 
       <View style={[styles.pickerRow, pickerRowPopoverOpen && styles.pickerRowOpen]}>
         {/* Human slots (which, in two-player mode, is both of them) show the selected profile's own
@@ -138,7 +153,7 @@ export function LobbyPlayerPanel({ idPrefix, host, color, onColorChange, swatche
         {/* Side by side with the color picker rather than stacked — see PlayerSetupPanel (BoxHockey)
         for the sibling component this mirrors. Web-only (keyboard has no touch-gesture equivalent
         to pick a "feel" for), so on native/touch this row still only ever shows the color picker. */}
-        {isHuman && showKeyScheme && keyScheme && onKeySchemeChange && <SectionedDropdown id={`${idPrefix}-controls`} host={popover} icon='keyboard-outline' accessibilityLabel='Control scheme' sections={[{ kind: 'single', id: 'controls', options: keySchemeOptions, value: keyScheme, onChange: onKeySchemeChange }]} accentColor={color} mutedColor={mutedColor} dark={dark} />}
+        {isHuman && showKeyScheme && keyScheme && onKeySchemeChange && <SectionedDropdown id={`${idPrefix}-controls`} host={popover} icon='keyboard-outline' accessibilityLabel='Control scheme' sections={[{ kind: 'single', id: 'controls', options: KEY_SCHEME_OPTIONS, value: keyScheme, onChange: onKeySchemeChange, takenValue: otherKeyScheme }]} accentColor={color} mutedColor={mutedColor} dark={dark} />}
       </View>
 
       {isHuman && showReadyButton && onToggleReady && <ReadyButton color={color} ready={ready ?? false} onToggleReady={onToggleReady} />}

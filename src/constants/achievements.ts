@@ -1,11 +1,11 @@
-import { AchievementDefinition, AchievementTier, CpuDifficulty } from '@/types'
+import { AchievementTier, tieredFamily } from '@tastic/achievements'
+
+import { AchievementDefinition, CpuDifficulty, StatsState } from '@/types'
 import { getColorsWithAtLeastOneWin, getMaxSingleColorWins, getOverallTotals } from '@/utils/statsEngine'
 
-export const ACHIEVEMENT_TIER_COLORS: Record<AchievementTier, string> = {
-  bronze: '#CD7F32',
-  silver: '#C0C0C8',
-  gold: '#FFD54F'
-}
+// Re-exported so the achievements screen keeps importing its badge palette from this module
+// alongside the catalog itself, rather than reaching into the package for one of the two.
+export { ACHIEVEMENT_TIER_COLORS } from '@tastic/achievements'
 
 // Total colors in @rific/auto-paper's ColorPicker `defaultColors` swatch grid — hardcoded rather
 // than imported, matching constants/game.ts's own precedent (DEFAULT_P1_COLOR/DEFAULT_P2_COLOR are
@@ -13,30 +13,12 @@ export const ACHIEVEMENT_TIER_COLORS: Record<AchievementTier, string> = {
 // Jest-safe constants file rather than importing a large multi-export UI package for one number.
 const TOTAL_SWATCH_COLORS = 20
 
-interface TieredThresholds {
-  bronze: number
-  silver: number
-  gold: number
-}
-
-function tieredFamily(idPrefix: string, titles: Record<AchievementTier, string>, description: (threshold: number) => string, icon: string, thresholds: TieredThresholds, getValue: (stats: Parameters<AchievementDefinition['isUnlocked']>[0]) => number): AchievementDefinition[] {
-  return (['bronze', 'silver', 'gold'] as AchievementTier[]).map((tier) => {
-    const threshold = thresholds[tier]
-    return {
-      id: `${idPrefix}_${tier}`,
-      title: titles[tier],
-      description: description(threshold),
-      tier,
-      icon,
-      isUnlocked: (stats) => getValue(stats) >= threshold,
-      progress: (stats) => Math.min(1, getValue(stats) / threshold)
-    }
-  })
-}
-
 const CPU_DIFFICULTY_TIER: Record<CpuDifficulty, AchievementTier> = { easy: 'bronze', normal: 'silver', hard: 'gold' }
 const CPU_DIFFICULTY_LABEL: Record<CpuDifficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' }
 
+// Not a tieredFamily: the three tiers here are three DIFFERENT predicates (one per difficulty),
+// not one value measured against three thresholds, and "progress toward beating Hard once" isn't a
+// meaningful fraction — so these are hand-written and deliberately carry no `progress`.
 function beatCpuFamily(): AchievementDefinition[] {
   const titles: Record<CpuDifficulty, string> = { easy: 'Rookie Slayer', normal: 'Worthy Opponent', hard: 'Giant Slayer' }
   return (['easy', 'normal', 'hard'] as CpuDifficulty[]).map((difficulty) => ({
@@ -45,7 +27,7 @@ function beatCpuFamily(): AchievementDefinition[] {
     description: `Beat the CPU on ${CPU_DIFFICULTY_LABEL[difficulty]} difficulty.`,
     tier: CPU_DIFFICULTY_TIER[difficulty],
     icon: 'robot',
-    isUnlocked: (stats) => stats.vsCpu.byDifficulty[difficulty].wins >= 1
+    isUnlocked: (stats: StatsState) => stats.vsCpu.byDifficulty[difficulty].wins >= 1
   }))
 }
 
@@ -78,62 +60,76 @@ export const ACHIEVEMENT_CATALOG: AchievementDefinition[] = [
     description: 'Win the very first game you ever play.',
     tier: 'gold',
     icon: 'star-circle',
-    // The one true global exception (see types/index.ts's AchievementDefinition.scope doc): reads
+    // The one true global exception (see types/index.ts's AchievementDefinition scope doc): reads
     // firstGameResult, a one-time device-wide flag set from seat 1's perspective on the very first
     // round ever recorded, with no profile identity at all — always evaluated against the real
     // device StatsState regardless of which profile tab is selected on the achievements screen.
     scope: 'device',
     isUnlocked: (stats) => stats.firstGameResult === 'win'
   },
-  ...tieredFamily(
-    'games_played',
-    { bronze: 'Getting Started', silver: 'Regular', gold: 'Veteran' },
-    (n) => `Play ${n} total games.`,
-    'gamepad-variant',
-    { bronze: 10, silver: 50, gold: 200 },
-    (stats) => stats.vsCpu.played + stats.twoPlayer.played
-  ),
-  ...tieredFamily(
-    'total_wins',
-    { bronze: 'Winner', silver: 'Big Winner', gold: 'Champion' },
-    (n) => `Win ${n} total games.`,
-    'trophy',
-    { bronze: 10, silver: 50, gold: 200 },
-    (stats) => getOverallTotals(stats).wins
-  ),
-  ...tieredFamily(
-    'cpu_streak',
-    { bronze: 'On a Roll', silver: 'Hot Streak', gold: 'Unstoppable' },
-    (n) => `Win ${n} games in a row against the CPU.`,
-    'fire',
-    { bronze: 3, silver: 5, gold: 10 },
-    (stats) => stats.vsCpu.bestWinStreak
-  ),
+  ...tieredFamily<StatsState>({
+    id: 'games_played',
+    titles: { bronze: 'Getting Started', silver: 'Regular', gold: 'Veteran' },
+    description: (n) => `Play ${n} total games.`,
+    icon: 'gamepad-variant',
+    thresholds: { bronze: 10, silver: 50, gold: 200 },
+    value: (stats) => stats.vsCpu.played + stats.twoPlayer.played
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'total_wins',
+    titles: { bronze: 'Winner', silver: 'Big Winner', gold: 'Champion' },
+    description: (n) => `Win ${n} total games.`,
+    icon: 'trophy',
+    thresholds: { bronze: 10, silver: 50, gold: 200 },
+    value: (stats) => getOverallTotals(stats).wins
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'cpu_streak',
+    titles: { bronze: 'On a Roll', silver: 'Hot Streak', gold: 'Unstoppable' },
+    description: (n) => `Win ${n} games in a row against the CPU.`,
+    icon: 'fire',
+    thresholds: { bronze: 3, silver: 5, gold: 10 },
+    value: (stats) => stats.vsCpu.bestWinStreak
+  }),
   ...beatCpuFamily(),
-  ...tieredFamily('color_mastery', { bronze: 'Color Novice', silver: 'Color Expert', gold: 'Color Master' }, (n) => `Win ${n} games with a single color.`, 'palette', { bronze: 10, silver: 25, gold: 50 }, getMaxSingleColorWins),
-  ...tieredFamily('color_collector', { bronze: 'Branching Out', silver: 'Rainbow Rider', gold: 'Full Spectrum' }, (n) => `Win with ${n} different colors.`, 'palette-swatch', { bronze: 5, silver: 12, gold: TOTAL_SWATCH_COLORS }, getColorsWithAtLeastOneWin),
-  ...tieredFamily(
-    'draws',
-    { bronze: 'Stalemate', silver: 'Deadlock', gold: 'Mutually Assured' },
-    (n) => `Draw ${n} games.`,
-    'handshake-outline',
-    { bronze: 5, silver: 15, gold: 40 },
-    (stats) => stats.vsCpu.draws + stats.twoPlayer.draws
-  ),
-  ...tieredFamily(
-    'local_matches',
-    { bronze: 'Pass the Controller', silver: 'Couch Champion', gold: 'Living Room Legend' },
-    (n) => `Play ${n} local two-player games.`,
-    'account-multiple',
-    { bronze: 10, silver: 50, gold: 150 },
-    (stats) => stats.twoPlayer.played
-  ),
-  ...tieredFamily(
-    'days_played',
-    { bronze: 'Regular Visitor', silver: 'Dedicated', gold: 'Devoted' },
-    (n) => `Play ${n} days in a row.`,
-    'calendar-check',
-    { bronze: 3, silver: 14, gold: 30 },
-    (stats) => stats.bestDayStreak
-  )
+  ...tieredFamily<StatsState>({
+    id: 'color_mastery',
+    titles: { bronze: 'Color Novice', silver: 'Color Expert', gold: 'Color Master' },
+    description: (n) => `Win ${n} games with a single color.`,
+    icon: 'palette',
+    thresholds: { bronze: 10, silver: 25, gold: 50 },
+    value: getMaxSingleColorWins
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'color_collector',
+    titles: { bronze: 'Branching Out', silver: 'Rainbow Rider', gold: 'Full Spectrum' },
+    description: (n) => `Win with ${n} different colors.`,
+    icon: 'palette-swatch',
+    thresholds: { bronze: 5, silver: 12, gold: TOTAL_SWATCH_COLORS },
+    value: getColorsWithAtLeastOneWin
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'draws',
+    titles: { bronze: 'Stalemate', silver: 'Deadlock', gold: 'Mutually Assured' },
+    description: (n) => `Draw ${n} games.`,
+    icon: 'handshake-outline',
+    thresholds: { bronze: 5, silver: 15, gold: 40 },
+    value: (stats) => stats.vsCpu.draws + stats.twoPlayer.draws
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'local_matches',
+    titles: { bronze: 'Pass the Controller', silver: 'Couch Champion', gold: 'Living Room Legend' },
+    description: (n) => `Play ${n} local two-player games.`,
+    icon: 'account-multiple',
+    thresholds: { bronze: 10, silver: 50, gold: 150 },
+    value: (stats) => stats.twoPlayer.played
+  }),
+  ...tieredFamily<StatsState>({
+    id: 'days_played',
+    titles: { bronze: 'Regular Visitor', silver: 'Dedicated', gold: 'Devoted' },
+    description: (n) => `Play ${n} days in a row.`,
+    icon: 'calendar-check',
+    thresholds: { bronze: 3, silver: 14, gold: 30 },
+    value: (stats) => stats.bestDayStreak
+  })
 ]

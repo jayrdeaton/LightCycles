@@ -1,15 +1,14 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
+import { useAchievements } from '@tastic/achievements'
+import { createContext, ReactNode, useCallback, useContext, useMemo } from 'react'
 
 import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
 import { AchievementDefinition, CpuDifficulty, GameMode, Player, RoundOutcome, StatsState, UnlockedAchievementsState } from '@/types'
-import { evaluateUnlockedIds, evaluateUnlockedIdsForProfile, unlockedKey } from '@/utils/achievementEngine'
-import { DEFAULT_ACHIEVEMENTS, isValidAchievements } from '@/utils/achievementsValidation'
-import { applyRoundOutcome } from '@/utils/statsEngine'
+import { applyRoundOutcome, getProfileStatsView } from '@/utils/statsEngine'
 import { DEFAULT_STATS, isValidStats } from '@/utils/statsValidation'
 
-const STATS_STORAGE_KEY = 'lightcycles.stats'
-const ACHIEVEMENTS_STORAGE_KEY = 'lightcycles.achievements'
+// Produces 'lightcycles.stats' and 'lightcycles.achievements' — byte-identical to the two keys this
+// app has always written, so an existing install's stored blobs load unchanged after this port.
+const STORAGE_NAMESPACE = 'lightcycles'
 
 interface RecordRoundOutcomeContext {
   gameMode: GameMode
@@ -18,12 +17,11 @@ interface RecordRoundOutcomeContext {
   profileIds?: Partial<Record<Player, string>>
 }
 
-// Returned by recordRoundOutcome below — `device` is the existing device-wide/"All Profiles"
-// newly-unlocked list (bare-id keyed, exactly as before this shape split), `profiles` is a parallel
-// per-seat breakdown of whatever that seat's OWN saved profile newly unlocked this round (only seats
-// present in context.profileIds ever get an entry). Kept as two separate lists rather than one
-// merged one because game.tsx's two toast paths (the plain vsCpu Snackbar vs. two-player's
-// per-player facing dialogs) need to tell them apart.
+// Returned by recordRoundOutcome below — `device` is the device-wide/"All Profiles" newly-unlocked
+// list (bare-id keyed), `profiles` is a parallel per-seat breakdown of whatever that seat's OWN
+// saved profile newly unlocked this round (only seats present in context.profileIds ever get an
+// entry). Kept as two separate lists rather than one merged one because game.tsx's two toast paths
+// (the plain vsCpu Snackbar vs. two-player's per-player facing dialogs) need to tell them apart.
 export interface RecordRoundOutcomeResult {
   device: AchievementDefinition[]
   profiles: Partial<Record<Player, AchievementDefinition[]>>
@@ -32,6 +30,10 @@ export interface RecordRoundOutcomeResult {
 interface GameStatsContextValue {
   stats: StatsState
   unlockedAchievements: UnlockedAchievementsState
+  // False until the stored blobs have been read (or failed to read) — see @tastic/achievements' own
+  // useAchievements doc: lets achievements.tsx hold off rendering "0 games played" over real,
+  // still-loading data.
+  loaded: boolean
   // Updates both stats and achievement-unlock state in one call, persisting each, and returns
   // whatever newly unlocked this round (empty lists if nothing did) so the caller can surface a
   // toast — see RecordRoundOutcomeResult above.
@@ -39,8 +41,8 @@ interface GameStatsContextValue {
   // Wipes both stored keys back to defaults — irreversible, so the caller is expected to confirm
   // with the player first (see achievements.tsx's reset confirmation dialog).
   resetAll: () => void
-  // Permanently drops one profile's stats entry — used when deleting a profile (see
-  // app/profiles.tsx), so a deleted profile doesn't leave its stats behind as orphaned data.
+  // Permanently drops one profile's stats entry and its unlock history — used when deleting a
+  // profile (see app/profiles.tsx), so a deleted profile doesn't leave orphaned data behind.
   // Irreversible, same as resetAll — the caller is expected to confirm with the player first.
   removeProfileStats: (profileId: string) => void
 }
@@ -51,159 +53,70 @@ interface Props {
   children: ReactNode
 }
 
-// Self-healing sweep, both device-wide (as before) and now per-profile: covers a catalog gaining a
-// new achievement that existing stats already clear, and the rare case where the stats write
-// succeeded but the achievements write didn't. The per-profile pass only needs stats.profiles' own
-// keys, not the full Profile[] roster from useProfiles() — which matters, since GameStatsProvider is
-// mounted as an ancestor of ProfilesProvider in _layout.tsx and structurally can't reach it.
-function backfillUnlocked(stats: StatsState, unlocked: UnlockedAchievementsState): UnlockedAchievementsState {
-  let next = unlocked
-
-  const missingDevice = [...evaluateUnlockedIds(stats)].filter((id) => !(id in next))
-  if (missingDevice.length > 0) {
-    next = { ...next }
-    missingDevice.forEach((id) => {
-      next[id] = Date.now()
-    })
-  }
-
-  for (const profileId of Object.keys(stats.profiles)) {
-    const missing = [...evaluateUnlockedIdsForProfile(stats.profiles[profileId])].filter((id) => !(unlockedKey(id, profileId) in next))
-    if (missing.length === 0) continue
-    if (next === unlocked) next = { ...unlocked }
-    missing.forEach((id) => {
-      next[unlockedKey(id, profileId)] = Date.now()
-    })
-  }
-
-  return next
+// Every profile bucket, synthesized into the full StatsState-shaped view its achievements are
+// evaluated against — this is what gives per-profile tracking full parity with the device-wide
+// pass, since the exact same predicates run over both (see statsEngine.ts's getProfileStatsView).
+function profileViews(stats: StatsState): Record<string, StatsState> {
+  return Object.fromEntries(Object.entries(stats.profiles).map(([profileId, bucket]) => [profileId, getProfileStatsView(bucket)]))
 }
 
 // Single source of truth for local stats/achievements, mounted once in _layout.tsx — same
 // single-Provider rationale as useGameSettings.tsx (expo-router keeps prior screens mounted, so a
 // per-screen AsyncStorage-backed copy could go stale or clobber a concurrent update).
+//
+// Loading, validation, the self-healing unlock backfill and both AsyncStorage writes now all live
+// in @tastic/achievements' useAchievements — what stays here is the LightCycles-specific part: the
+// stats shape, its funnel (applyRoundOutcome), and the seat-vs-profile-id translation below.
 export function GameStatsProvider({ children }: Props) {
-  const [stats, setStats] = useState<StatsState>(DEFAULT_STATS)
-  const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementsState>(DEFAULT_ACHIEVEMENTS)
-
-  useEffect(() => {
-    Promise.all([AsyncStorage.getItem(STATS_STORAGE_KEY), AsyncStorage.getItem(ACHIEVEMENTS_STORAGE_KEY)])
-      .then(([storedStats, storedAchievements]) => {
-        let loadedStats = DEFAULT_STATS
-        if (storedStats) {
-          try {
-            const parsed = JSON.parse(storedStats)
-            // `profiles ?? {}` is the entire "migration" a blob stored before that field existed
-            // needs — see isValidStats, which already treats an absent `profiles` key as valid.
-            if (isValidStats(parsed)) loadedStats = { ...parsed, profiles: parsed.profiles ?? {} }
-          } catch {
-            // Corrupt/stale blob — keep defaults.
-          }
-        }
-
-        let loadedAchievements = DEFAULT_ACHIEVEMENTS
-        if (storedAchievements) {
-          try {
-            const parsed = JSON.parse(storedAchievements)
-            if (isValidAchievements(parsed)) loadedAchievements = parsed
-          } catch {
-            // Corrupt/stale blob — keep defaults.
-          }
-        }
-
-        // Self-healing backfill: covers a catalog gaining a new achievement that existing stats
-        // already clear, and the rare case where the stats write succeeded but the achievements
-        // write didn't.
-        const reconciled = backfillUnlocked(loadedStats, loadedAchievements)
-        if (reconciled !== loadedAchievements) AsyncStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(reconciled)).catch(() => {})
-
-        setStats(loadedStats)
-        setUnlockedAchievements(reconciled)
-      })
-      .catch(() => {
-        // Unavailable storage — DEFAULT_STATS/DEFAULT_ACHIEVEMENTS already in state is a complete,
-        // silent fallback, same as useGameSettings.tsx.
-      })
-  }, [])
+  const { stats, unlockedAchievements, loaded, recordOutcome, resetAll, removeProfile } = useAchievements<StatsState>({
+    namespace: STORAGE_NAMESPACE,
+    catalog: ACHIEVEMENT_CATALOG,
+    defaultStats: DEFAULT_STATS,
+    isValidStats,
+    profileViews,
+    // `profiles ?? {}` is the entire "migration" a blob stored before that field existed needs —
+    // see isValidStats, which already treats an absent `profiles` key as valid.
+    migrateStats: (stored) => ({ ...stored, profiles: stored.profiles ?? {} })
+  })
 
   const recordRoundOutcome = useCallback(
     (outcome: RoundOutcome, context: RecordRoundOutcomeContext): RecordRoundOutcomeResult => {
-      const nextStats = applyRoundOutcome(stats, outcome, context)
+      const result = recordOutcome((prev) => applyRoundOutcome(prev, outcome, context))
 
-      const deviceUnlockedIds = evaluateUnlockedIds(nextStats)
-      const device = ACHIEVEMENT_CATALOG.filter((achievement) => deviceUnlockedIds.has(achievement.id) && !(achievement.id in unlockedAchievements))
-
-      const now = Date.now()
-      let nextUnlocked = unlockedAchievements
-      if (device.length > 0) {
-        nextUnlocked = { ...nextUnlocked }
-        device.forEach((achievement) => {
-          nextUnlocked[achievement.id] = now
-        })
-      }
-
+      // The package reports per-profile unlocks keyed by profile id, since it has no notion of
+      // seats; game.tsx thinks in seats, so translate back through the same profileIds map that
+      // produced them. A seat with no profile selected simply has no entry either way.
       const profiles: Partial<Record<Player, AchievementDefinition[]>> = {}
       if (context.profileIds) {
         for (const seat of [1, 2] as Player[]) {
           const profileId = context.profileIds[seat]
           if (!profileId) continue
-          const profileStats = nextStats.profiles[profileId]
-          if (!profileStats) continue
-          const profileUnlockedIds = evaluateUnlockedIdsForProfile(profileStats)
-          const newlyUnlockedForProfile = ACHIEVEMENT_CATALOG.filter((achievement) => profileUnlockedIds.has(achievement.id) && !(unlockedKey(achievement.id, profileId) in unlockedAchievements))
-          if (newlyUnlockedForProfile.length === 0) continue
-          profiles[seat] = newlyUnlockedForProfile
-          if (nextUnlocked === unlockedAchievements) nextUnlocked = { ...unlockedAchievements }
-          newlyUnlockedForProfile.forEach((achievement) => {
-            nextUnlocked[unlockedKey(achievement.id, profileId)] = now
-          })
+          const unlockedForProfile = result.profiles[profileId]
+          if (unlockedForProfile && unlockedForProfile.length > 0) profiles[seat] = unlockedForProfile
         }
       }
 
-      setStats(nextStats)
-      AsyncStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(nextStats)).catch(() => {})
-
-      if (nextUnlocked !== unlockedAchievements) {
-        setUnlockedAchievements(nextUnlocked)
-        AsyncStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(nextUnlocked)).catch(() => {})
-      }
-
-      return { device, profiles }
+      return { device: result.device, profiles }
     },
-    [stats, unlockedAchievements]
+    [recordOutcome]
   )
-
-  const resetAll = useCallback(() => {
-    setStats(DEFAULT_STATS)
-    setUnlockedAchievements(DEFAULT_ACHIEVEMENTS)
-    AsyncStorage.removeItem(STATS_STORAGE_KEY).catch(() => {})
-    AsyncStorage.removeItem(ACHIEVEMENTS_STORAGE_KEY).catch(() => {})
-  }, [])
 
   const removeProfileStats = useCallback(
     (profileId: string) => {
-      const hasStats = profileId in stats.profiles
-      const unlockedKeysToDrop = Object.keys(unlockedAchievements).filter((key) => key.startsWith(`${profileId}:`))
-      if (!hasStats && unlockedKeysToDrop.length === 0) return
-
-      if (hasStats) {
-        const { [profileId]: _removed, ...rest } = stats.profiles
-        const nextStats = { ...stats, profiles: rest }
-        setStats(nextStats)
-        AsyncStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(nextStats)).catch(() => {})
-      }
-
-      if (unlockedKeysToDrop.length > 0) {
-        const nextUnlocked = { ...unlockedAchievements }
-        unlockedKeysToDrop.forEach((key) => delete nextUnlocked[key])
-        setUnlockedAchievements(nextUnlocked)
-        AsyncStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(nextUnlocked)).catch(() => {})
-      }
+      // The unlock keys are the package's to prune; this app's own stats blob is pruned by the
+      // updater, since only this app knows where a profile's bucket lives inside StatsState.
+      removeProfile(profileId, (prev) => {
+        if (!(profileId in prev.profiles)) return prev
+        const { [profileId]: _removed, ...rest } = prev.profiles
+        return { ...prev, profiles: rest }
+      })
     },
-    [stats, unlockedAchievements]
+    [removeProfile]
   )
 
-  return <GameStatsContext.Provider value={{ stats, unlockedAchievements, recordRoundOutcome, resetAll, removeProfileStats }}>{children}</GameStatsContext.Provider>
+  const value = useMemo(() => ({ stats, unlockedAchievements, loaded, recordRoundOutcome, resetAll, removeProfileStats }), [stats, unlockedAchievements, loaded, recordRoundOutcome, resetAll, removeProfileStats])
+
+  return <GameStatsContext.Provider value={value}>{children}</GameStatsContext.Provider>
 }
 
 export function useGameStats() {

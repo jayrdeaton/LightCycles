@@ -1,66 +1,52 @@
+import { DEFAULT_DAY_STREAK, DEFAULT_OUTCOME_RECORD, DEFAULT_WIN_STREAK } from '@tastic/achievements'
+
 import { ColorStats, CpuDifficulty, DifficultyRecord, ProfileStats, StatsState, TwoPlayerStats, VsCpuStats } from '@/types'
 
 // Pulled out of hooks/useGameStats.tsx specifically so it's testable without dragging in
 // @react-native-async-storage/async-storage, which throws at import time under Jest's plain Node
 // environment (its native module is never linked there) — mirrors gameSettingsValidation.ts.
-const DEFAULT_DIFFICULTY_RECORD: DifficultyRecord = { played: 0, wins: 0, losses: 0, draws: 0 }
 
-export const DEFAULT_STATS: StatsState = {
-  vsCpu: {
-    played: 0,
-    wins: 0,
-    losses: 0,
-    draws: 0,
+// A zeroed vsCpu bucket: an empty win/loss/draw record, an empty per-difficulty breakdown, and a
+// zeroed win streak. Built from @tastic/achievements' own defaults rather than restating the
+// literals, so this can't drift from the shapes those helpers actually produce. A function, not a
+// constant — DEFAULT_PROFILE_STATS and DEFAULT_STATS below each need their own independent object,
+// not two references to the same one (every consumer only ever spreads/reads these today, but a
+// shared reference is a standing invitation for a future in-place mutation to corrupt both at once).
+function createDefaultVsCpu(): VsCpuStats {
+  return {
+    ...DEFAULT_OUTCOME_RECORD,
     byDifficulty: {
-      easy: { ...DEFAULT_DIFFICULTY_RECORD },
-      normal: { ...DEFAULT_DIFFICULTY_RECORD },
-      hard: { ...DEFAULT_DIFFICULTY_RECORD }
+      easy: { ...DEFAULT_OUTCOME_RECORD },
+      normal: { ...DEFAULT_OUTCOME_RECORD },
+      hard: { ...DEFAULT_OUTCOME_RECORD }
     },
-    currentWinStreak: 0,
-    bestWinStreak: 0
-  },
-  twoPlayer: {
-    played: 0,
-    p1Wins: 0,
-    p2Wins: 0,
-    draws: 0
-  },
-  colors: {},
-  profiles: {},
-  distinctDaysPlayed: 0,
-  currentDayStreak: 0,
-  bestDayStreak: 0,
-  lastPlayedDate: null,
-  firstGameResult: null
+    ...DEFAULT_WIN_STREAK
+  }
+}
+
+function createDefaultTwoPlayer(): TwoPlayerStats {
+  return { played: 0, p1Wins: 0, p2Wins: 0, draws: 0 }
 }
 
 // A fresh profile's starting bucket — same zeroed vsCpu/twoPlayer shape as DEFAULT_STATS' own
 // top-level fields, since ProfileStats mirrors StatsState's decomposable parts (see types/index.ts).
 export const DEFAULT_PROFILE_STATS: ProfileStats = {
-  vsCpu: {
-    played: 0,
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    byDifficulty: {
-      easy: { ...DEFAULT_DIFFICULTY_RECORD },
-      normal: { ...DEFAULT_DIFFICULTY_RECORD },
-      hard: { ...DEFAULT_DIFFICULTY_RECORD }
-    },
-    currentWinStreak: 0,
-    bestWinStreak: 0
-  },
-  twoPlayer: {
-    played: 0,
-    p1Wins: 0,
-    p2Wins: 0,
-    draws: 0
-  },
+  vsCpu: createDefaultVsCpu(),
+  twoPlayer: createDefaultTwoPlayer(),
   colors: {},
-  distinctDaysPlayed: 0,
-  currentDayStreak: 0,
-  bestDayStreak: 0,
-  lastPlayedDate: null
+  ...DEFAULT_DAY_STREAK
+}
+
+// vsCpu/twoPlayer/colors are re-created here rather than spread straight from
+// DEFAULT_PROFILE_STATS, specifically so the two don't end up aliasing the same nested objects —
+// see createDefaultVsCpu's own doc.
+export const DEFAULT_STATS: StatsState = {
+  ...DEFAULT_PROFILE_STATS,
+  vsCpu: createDefaultVsCpu(),
+  twoPlayer: createDefaultTwoPlayer(),
+  colors: {},
+  profiles: {},
+  firstGameResult: null
 }
 
 function isValidDifficultyRecord(value: unknown): value is DifficultyRecord {

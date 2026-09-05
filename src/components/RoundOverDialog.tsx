@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native'
 import { Icon, Text } from 'react-native-paper'
 
 import { AchievementDefinition, GameMode, OrientationMode, Player, RoundOutcome } from '@/types'
+import { zoneSideFor } from '@/utils/playerZones'
 
 export interface RoundOverDialogProps {
   orientationMode: OrientationMode
@@ -97,11 +98,11 @@ export default function RoundOverDialog({ orientationMode, p1OnRight, rotation, 
     )
   }
 
-  const isFaceToFace = orientationMode === 'faceToFace'
-  // Matches OnboardingOverlay's identical split exactly, so a player's zone never swaps sides
-  // between the countdown and this dialog.
-  const p1Zone = isFaceToFace ? styles.zoneBottom : p1OnRight ? styles.zoneRight : styles.zoneLeft
-  const p2Zone = isFaceToFace ? styles.zoneTop : p1OnRight ? styles.zoneLeft : styles.zoneRight
+  // Matches OnboardingOverlay's identical split exactly (both via zoneSideFor), so a player's zone
+  // never swaps sides between the countdown and this dialog.
+  const zoneStyles = { top: styles.zoneTop, bottom: styles.zoneBottom, left: styles.zoneLeft, right: styles.zoneRight }
+  const p1Zone = zoneStyles[zoneSideFor(1, orientationMode, p1OnRight)]
+  const p2Zone = zoneStyles[zoneSideFor(2, orientationMode, p1OnRight)]
 
   const renderCard = (player: Player) => {
     const { text, icon, color } = perspective(player)

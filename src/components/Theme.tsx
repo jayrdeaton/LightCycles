@@ -14,13 +14,16 @@ SplashScreen.preventAutoHideAsync()
 SplashScreen.setOptions({ fade: true, duration: 400 })
 
 const APPEARANCE_STORAGE_KEY = 'lightcycles.appearance'
-const PLAYER_COLORS_STORAGE_KEY = 'lightcycles.playerColors'
+// Exported: this is also the guest-color slot lobby.tsx's useSeatColors.tsx persists to (see its
+// own doc) — the two are deliberately the same key/shape rather than a redundant third one, since a
+// guest's own color IS what this cold-boot read is seeding before any seat-aware screen exists.
+export const PLAYER_COLORS_STORAGE_KEY = 'lightcycles.playerColors'
 
 function triadFor(p1: string, p2: string) {
   return { primary: p1, secondary: p2, tertiary: getThirdColor(p1, p2) }
 }
 
-function isValidHex(value: unknown): value is string {
+export function isValidHex(value: unknown): value is string {
   return typeof value === 'string' && getRgb(value) !== null
 }
 
@@ -75,11 +78,16 @@ export function Theme({ children }: Props) {
 
   // Only persists — AutoPaperProvider owns the live settings after mount, and calling setSettings
   // here too would update this parent component while the provider (a child) is rendering.
+  //
+  // Deliberately does NOT persist next.color here anymore: this fired on every live theme change
+  // regardless of *why* the color changed, which meant a profile-seat's clash-swap or manual
+  // recolor (a transient, per-match override — see lobby.tsx) silently overwrote this blob with a
+  // color the profile itself never saved, and a CPU seat's color fought over the exact same slot as
+  // a human guest's. Only lobby.tsx knows which seat is a profile/guest/CPU right now, so it's the
+  // one place set up to persist a seat's color correctly (see its own useSeatColors.tsx) — this
+  // still only ever seeds the cold-boot default from whatever that logic last wrote here.
   const onChange = useCallback((next: ThemeSettings) => {
     AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next.appearance).catch(() => {})
-    if (typeof next.color === 'object') {
-      AsyncStorage.setItem(PLAYER_COLORS_STORAGE_KEY, JSON.stringify({ p1: next.color.primary, p2: next.color.secondary })).catch(() => {})
-    }
   }, [])
 
   if (!settings) return null

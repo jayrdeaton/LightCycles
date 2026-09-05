@@ -1,3 +1,5 @@
+import { AchievementDefinition as BaseAchievementDefinition, DayStreakState, OutcomeRecord, RoundResult, WinStreakState } from '@tastic/achievements'
+
 export type Player = 1 | 2
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
@@ -151,9 +153,12 @@ export interface GameSettings {
   enabledPowerups: PowerupType[]
   // Static obstacle layout for the round's board — see utils/arenas.ts's buildArenaObstacles.
   arenaVariant: ArenaVariant
-  // Per-round lobby setting (not a persisted SettingsDialog preference): whether a player's trail
-  // is allowed to extend into their own "safe" starting zone once they've left it. Rendering/
-  // enforcement lives entirely in game.tsx, not here.
+  // Per-round lobby setting (not a persisted SettingsDialog preference), labeled "Full Screen" in
+  // the UI: whether the board bleeds all the way to the physical screen edge, or stays inset by the
+  // device's safe area (notch/home indicator) plus a @tastic/core gutter on anything wider than
+  // MAX_BOARD_CONTENT_WIDTH. Rendering/enforcement lives entirely in game.tsx, not here. Deliberately
+  // left out of the lobby's "Randomize" shuffle despite living in the same bundled UI row as
+  // wrapEdges below — see handleRandomizeMatchSettings' own comment for why.
   extendIntoSafeArea: boolean
   // Per-round lobby setting, same shape as extendIntoSafeArea above: Pac-Man-style screen wrap —
   // stepping off one edge of the grid re-enters from the opposite edge instead of crashing (see
@@ -164,7 +169,7 @@ export interface GameSettings {
   // iOS-only. Off by default — deliberately opt-in rather than always-on, so it only kicks in for
   // someone who's actually hit the problem and gone looking for a fix, instead of every player
   // eating a "swipe twice to go home" surprise from day one. Mirrored into native UserDefaults (see
-  // useGameSettings.tsx) for plugins/withDeferBottomEdgeGestures.js's swizzled
+  // useGameSettings.tsx) for @tastic/edge-guard's own config plugin swizzle of
   // preferredScreenEdgesDeferringSystemGestures to read at runtime.
   deferBottomEdgeGestures: boolean
 }
@@ -200,28 +205,29 @@ export interface TurnIntentEvent {
   direction: Direction
 }
 
-export type AchievementTier = 'bronze' | 'silver' | 'gold'
+// Tier, unlock-map and achievement-definition types all come from @tastic/achievements now, and are
+// re-exported here under their existing names so every consumer keeps its own `@/types` import
+// untouched. AchievementDefinition is that package's generic, instantiated at this app's own stats
+// shape: an achievement is a pure predicate over StatsState, exactly as it was before.
+export type { AchievementTier, UnlockedAchievementsState } from '@tastic/achievements'
+export type AchievementDefinition = BaseAchievementDefinition<StatsState>
 
-export interface DifficultyRecord {
-  played: number
-  wins: number
-  losses: number
-  draws: number
-}
+// played/wins/losses/draws — one shape, reused for a difficulty bucket and a color bucket alike.
+// Local aliases of @tastic/achievements' OutcomeRecord rather than fresh declarations, so this
+// app's own vocabulary ("this color's stats") still reads at the call site while every helper in
+// that package (applyResult, getMostPlayedKey, ...) accepts them directly.
+export type DifficultyRecord = OutcomeRecord
+export type ColorStats = OutcomeRecord
 
-export interface VsCpuStats {
-  played: number
-  // Human wins/losses — the human is always seat 1 in vsCpu mode (see cpuAi.ts's CPU_PLAYER).
-  wins: number
-  losses: number
-  draws: number
+// The human's own vsCpu record — the human is always seat 1 in vsCpu mode (see cpuAi.ts's
+// CPU_PLAYER). currentWinStreak/bestWinStreak come from WinStreakState; a draw resets the streak
+// just like a loss (see @tastic/achievements' applyWinStreak).
+export interface VsCpuStats extends OutcomeRecord, WinStreakState {
   byDifficulty: Record<CpuDifficulty, DifficultyRecord>
-  // Human's current consecutive-win streak against the CPU, any difficulty — resets to 0 on a loss
-  // or a draw, not just a loss, since a draw isn't a win either.
-  currentWinStreak: number
-  bestWinStreak: number
 }
 
+// Not an OutcomeRecord: local two-player rounds are tallied by SEAT, so there's no single "wins"
+// field to share — p1Wins/p2Wins is the whole point of the shape.
 export interface TwoPlayerStats {
   played: number
   p1Wins: number
@@ -229,31 +235,17 @@ export interface TwoPlayerStats {
   draws: number
 }
 
-export interface ColorStats {
-  played: number
-  wins: number
-  losses: number
-  draws: number
-}
-
 // A profile's own personal record — mirrors the decomposable parts of StatsState (vsCpu/twoPlayer/
-// colors/day-streak fields), so the exact same achievement predicates and statsEngine.ts helpers
-// that evaluate device-wide StatsState can evaluate a profile's own view unchanged (see
-// statsEngine.ts's getProfileStatsView). twoPlayer.p1Wins/p2Wins are reinterpreted per profile: they
-// count THIS profile's own wins while occupying that seat that round, not "whoever occupied seat N"
+// colors, plus the DayStreakState fields it extends), so the exact same achievement predicates and
+// statsEngine.ts helpers that evaluate device-wide StatsState can evaluate a profile's own view
+// unchanged (see statsEngine.ts's getProfileStatsView). twoPlayer.p1Wins/p2Wins are reinterpreted
+// per profile: they mean this profile's OWN wins from seat 1 / seat 2, not the device's seat tally
 // — see statsEngine.ts's bumpProfileForSeat. Omits `profiles` (no nesting) and `firstGameResult`
-// (a one-time device-wide flag with no profile identity — see AchievementDefinition.scope). Accumulates
-// prospectively only, from whenever a profile is first attached to a seat going forward — there's no
-// per-round history stored anywhere (only running aggregates), so an existing profile's bucket cannot
-// retroactively inherit any share of stats recorded before this field gained this shape.
-export interface ProfileStats {
+// (a one-time device-wide flag with no profile identity — see AchievementDefinition's scope).
+export interface ProfileStats extends DayStreakState {
   vsCpu: VsCpuStats
   twoPlayer: TwoPlayerStats
   colors: Record<string, ColorStats>
-  distinctDaysPlayed: number
-  currentDayStreak: number
-  bestDayStreak: number
-  lastPlayedDate: string | null
 }
 
 // A locally-saved player identity — name, color, and a short tag, entirely opt-in. Independent of
@@ -279,7 +271,10 @@ export interface Profile {
   updatedAt: number
 }
 
-export interface StatsState {
+// Extends DayStreakState for distinctDaysPlayed/currentDayStreak/bestDayStreak/lastPlayedDate —
+// all four are maintained by @tastic/achievements' applyDayPlayed, which restarts a streak at 1
+// (not 0) after a gap, since the day just played is always day one of a new streak.
+export interface StatsState extends DayStreakState {
   vsCpu: VsCpuStats
   twoPlayer: TwoPlayerStats
   // Keyed by lowercase hex — every seat's color counts here regardless of gameMode, since color
@@ -289,45 +284,15 @@ export interface StatsState {
   // round outcome was recorded (see useGameStats.tsx's recordRoundOutcome context.profileIds). A
   // stored blob from before this field existed is still valid (see statsValidation.ts's
   // isValidStats, which treats an absent `profiles` key as valid) and gets backfilled to {} once,
-  // on load, in useGameStats.tsx — no schema-versioning machinery needed for a purely-additive field.
-  // Full-parity per-profile achievement tracking (see achievementEngine.ts's
-  // evaluateUnlockedIdsForProfile and achievements.tsx's profile picker) reads this map.
+  // on load, via useAchievements' own migrateStats option — no schema-versioning machinery needed
+  // for a purely-additive field. Full-parity per-profile achievement tracking (see
+  // achievementEngine.ts's evaluateUnlockedIdsForProfile and achievements.tsx's profile picker)
+  // reads this map.
   profiles: Record<string, ProfileStats>
-  distinctDaysPlayed: number
-  // Consecutive local calendar days played, ending today — resets to 1 (not 0) on any gap of a
-  // full day or more, since the day just played always counts as day one of a new streak. See
-  // statsEngine.ts's applyRoundOutcome for how a "gap" is detected.
-  currentDayStreak: number
-  bestDayStreak: number
-  // Local YYYY-MM-DD bookkeeping for distinctDaysPlayed/currentDayStreak — never rendered directly.
-  lastPlayedDate: string | null
   // Set once, only when the very first round ever is recorded, then never touched again — powers
   // the one-off "your first-ever game was a win" achievement, which isn't derivable from
   // cumulative totals alone once later games start piling on top. Always from seat 1's
   // perspective (the only well-defined "first game" framing across both vsCpu and twoPlayer,
   // where there's no other stable identity — see statsEngine.ts's applyRoundOutcome).
-  firstGameResult: 'win' | 'loss' | 'draw' | null
-}
-
-// Achievement id -> unlock timestamp (Date.now() ms).
-export type UnlockedAchievementsState = Record<string, number>
-
-export interface AchievementDefinition {
-  id: string
-  title: string
-  description: string
-  tier: AchievementTier
-  icon: string
-  // 'profile' (the default, when omitted) evaluates against whichever StatsState view is currently
-  // selected on the achievements screen — device-wide for "All Profiles", or a synthesized
-  // per-profile view (see statsEngine.ts's getProfileStatsView) for a specific profile tab. 'device'
-  // always evaluates against the real device-wide StatsState regardless of which tab is active —
-  // reserved for an achievement with no profile identity at all (see constants/achievements.ts's
-  // flawless_debut, the one true global exception: it reads firstGameResult, a one-time flag with no
-  // per-profile analog).
-  scope?: 'profile' | 'device'
-  isUnlocked: (stats: StatsState) => boolean
-  // 0-1 fraction toward unlocking, for the achievements screen's progress bars — omitted for
-  // one-off/binary achievements where "progress" isn't a meaningful concept (e.g. beat-a-difficulty).
-  progress?: (stats: StatsState) => number
+  firstGameResult: RoundResult | null
 }

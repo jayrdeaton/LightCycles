@@ -1,12 +1,14 @@
 import { getContrastColor } from '@rific/auto-paper'
-import { Canvas, Circle, Line, Path, Rect, Shadow, Skia, vec } from '@shopify/react-native-skia'
+import { Canvas, Circle, Line, Path, Shadow, Skia, vec } from '@shopify/react-native-skia'
+import { MysteryPickup, ObstacleRect } from '@tastic/sprites/shapes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
+import { Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withTiming } from 'react-native-reanimated'
 
 import { deathAnimationDurationMs, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, Portal, PowerupPickup, Tunnel } from '@/types'
 import { cellKey, cellToPixel, isAdjacent } from '@/utils/grid'
+import { zoneSideFor } from '@/utils/playerZones'
 
 export interface GameBoardProps {
   players: Record<Player, PlayerState>
@@ -63,35 +65,17 @@ const WALL_STROKE_WIDTH = 1.5
 // Every live pickup renders identically, regardless of its actual (already-decided, see
 // gameEngine.ts's maybeSpawnPickup) type — Mario-Kart mystery-box style. The type is only ever
 // revealed once collected, in the holder's own HUD badge (see PowerupHud.tsx), never on the board.
+// Thin wrapper around @tastic/sprites/shapes' MysteryPickup, which was reconciled directly from
+// this component's own former implementation (mount-triggered grow+fade-in, settling into an
+// endless back-and-forth radius pulse — see its own doc comment) — its unspecified defaults
+// (fillOpacity 0.35, ringOpacity 1, ringWidth 1.5, spawnStartScale 0.4, and ringColor falling back
+// to `color`) are this app's own literal former values, so only the three tuning constants below
+// are passed explicitly: LightCycles owns those via constants/game.ts and should stay in control
+// of them rather than silently inheriting whatever the shared package defaults to, even though
+// those defaults currently happen to equal the same numbers.
 function PowerupGlyph({ pickup, cellPx, color }: { pickup: PowerupPickup; cellPx: number; color: string }) {
-  const baseRadius = powerupPickupRadiusPx(cellPx)
   const center = cellCenter(pickup.cell, cellPx)
-
-  // `intro` runs 0 -> 1 once, the instant this glyph mounts (a fresh pickup — see this component's
-  // own key below, which remounts on every genuine spawn) rather than popping straight into
-  // existence. `pulse` only starts once intro finishes, then loops forever (see withRepeat's
-  // reverse arg for the back-and-forth) for as long as the pickup sits uncollected, as a quiet
-  // "I'm alive, come get me" cue. Both are purely cosmetic — never affect POWERUP_COLLECT_RADIUS_CELLS.
-  const intro = useSharedValue(0)
-  const pulse = useSharedValue(0)
-  useEffect(() => {
-    intro.value = withTiming(1, { duration: POWERUP_SPAWN_FADE_MS, easing: Easing.out(Easing.quad) })
-    pulse.value = withDelay(POWERUP_SPAWN_FADE_MS, withRepeat(withTiming(1, { duration: POWERUP_PULSE_DURATION_MS, easing: Easing.inOut(Easing.ease) }), -1, true))
-    // Intentionally runs once per mount (a fresh pickup, keyed by id in Powerups below) — not tied
-    // to any prop that changes while the same pickup is still sitting there.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const radius = useDerivedValue(() => baseRadius * (0.4 + 0.6 * intro.value) * (1 + pulse.value * POWERUP_PULSE_SCALE))
-  const strokeOpacity = useDerivedValue(() => intro.value)
-  const fillOpacity = useDerivedValue(() => intro.value * 0.35)
-
-  return (
-    <>
-      <Circle cx={center.x} cy={center.y} r={radius} color={color} opacity={fillOpacity} />
-      <Circle cx={center.x} cy={center.y} r={radius} style='stroke' strokeWidth={1.5} color={color} opacity={strokeOpacity} />
-    </>
-  )
+  return <MysteryPickup x={center.x} y={center.y} radius={powerupPickupRadiusPx(cellPx)} color={color} spawnFadeMs={POWERUP_SPAWN_FADE_MS} pulseDurationMs={POWERUP_PULSE_DURATION_MS} pulseScale={POWERUP_PULSE_SCALE} />
 }
 
 function Powerups({ pickups, cellPx, color }: { pickups: PowerupPickup[]; cellPx: number; color: string }) {
@@ -110,15 +94,13 @@ function Powerups({ pickups, cellPx, color }: { pickups: PowerupPickup[]; cellPx
 // stroke idea as PowerupGlyph's own circles (a near-opaque fill so the cell reads as solid/
 // impassable, plus a stroked outline at the same WALL_STROKE_WIDTH the perimeter walls use, so
 // obstacle geometry reads as the same kind of boundary marker rather than a different visual
-// language) — just static instead of pulsing.
+// language) — just static instead of pulsing. Thin wrapper around @tastic/sprites/shapes'
+// ObstacleRect, which was reconciled directly from this component's own former implementation —
+// strokeColor/strokeWidth opt into that second stroked Rect (omitted, its own default draws no
+// outline at all — a different app's plain-fill look, not this one's).
 function ObstacleCell({ cell, cellPx, color }: { cell: GridCell; cellPx: number; color: string }) {
   const { x, y } = cellToPixel(cell, cellPx)
-  return (
-    <>
-      <Rect x={x} y={y} width={cellPx} height={cellPx} color={color} opacity={0.85} />
-      <Rect x={x} y={y} width={cellPx} height={cellPx} style='stroke' strokeWidth={WALL_STROKE_WIDTH} color={color} />
-    </>
-  )
+  return <ObstacleRect x={x} y={y} width={cellPx} height={cellPx} color={color} opacity={0.85} strokeColor={color} strokeWidth={WALL_STROKE_WIDTH} />
 }
 
 function Obstacles({ obstacles, cellPx, color }: { obstacles: GridCell[]; cellPx: number; color: string }) {
@@ -200,41 +182,33 @@ function Tunnels({ tunnels, cellPx, color }: { tunnels: Tunnel[]; cellPx: number
   )
 }
 
-// Each player "owns" the half of the perimeter behind their own zone — the same top/bottom or
-// left/right split TouchInputLayer already uses for input zones (see grid.ts's startingStateFor)
-// — so the wall reads as which player crashes into which edge, not just an arbitrary boundary.
-// Drawn at the grid's own pixel size (cols/rows * cellPx), not the container's, since a container
-// a few pixels larger than a whole number of cells (see computeGridSize's flooring) still crashes
-// exactly at the grid edge — the outline should hug that real boundary, not the container's.
+// Each player "owns" the half of the perimeter behind their own zone — so the wall reads as which
+// player crashes into which edge, not just an arbitrary boundary. Which player owns which side is
+// zoneSideFor's job, not this function's — see its own comment. Drawn at the grid's own pixel size
+// (cols/rows * cellPx), not the container's, since a container a few pixels larger than a whole
+// number of cells (see computeGridSize's flooring) still crashes exactly at the grid edge — the
+// outline should hug that real boundary, not the container's.
 function wallPath(grid: GridSize, cellPx: number, orientationMode: OrientationMode, p1OnRight: boolean, player: Player) {
   const width = grid.cols * cellPx
   const height = grid.rows * cellPx
+  const midX = width / 2
+  const midY = height / 2
   const path = Skia.Path.Make()
 
-  if (orientationMode === 'faceToFace') {
-    // Player 2 is the "far" (top) zone, player 1 the "near" (bottom) zone.
-    const midY = height / 2
-    if (player === 2) {
-      path.moveTo(0, midY)
-      path.lineTo(0, 0)
-      path.lineTo(width, 0)
-      path.lineTo(width, midY)
-    } else {
-      path.moveTo(0, midY)
-      path.lineTo(0, height)
-      path.lineTo(width, height)
-      path.lineTo(width, midY)
-    }
-    return path
-  }
-
-  // Side-by-side (and web's shared layout): whichever player is currently on the right gets the
-  // right zone — see useAccelerometerOrientation for which physical rotation direction puts P1 there (and
-  // TouchInputLayer.tsx's identical split), so the wall matches wherever each player's zone
-  // actually ended up rather than assuming a fixed side.
-  const onRight = player === 1 ? p1OnRight : !p1OnRight
-  const midX = width / 2
-  if (!onRight) {
+  // Three sides of this player's own zone, omitting the fourth (the shared midline with the other
+  // player's zone).
+  const side = zoneSideFor(player, orientationMode, p1OnRight)
+  if (side === 'top') {
+    path.moveTo(0, midY)
+    path.lineTo(0, 0)
+    path.lineTo(width, 0)
+    path.lineTo(width, midY)
+  } else if (side === 'bottom') {
+    path.moveTo(0, midY)
+    path.lineTo(0, height)
+    path.lineTo(width, height)
+    path.lineTo(width, midY)
+  } else if (side === 'left') {
     path.moveTo(midX, 0)
     path.lineTo(0, 0)
     path.lineTo(0, height)

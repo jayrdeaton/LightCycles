@@ -1,6 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
-import { ProfilesManager } from '@tastic/profile'
+import { ProfilesManager, ProfilesManagerHandle } from '@tastic/profile'
+import { useRef } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { DEFAULT_P1_COLOR } from '@/constants/game'
@@ -29,10 +30,22 @@ export default function ProfilesScreen() {
   const { profiles, createProfile, updateProfile, deleteProfile } = useProfiles()
   // Only for wiring onDelete below — nothing else on this screen touches stats directly.
   const { removeProfileStats } = useGameStats()
+  // expo-router's web renderer keeps a popped screen mounted-but-hidden instead of unmounting it,
+  // so ProfilesManager's own unmount-flush fallback never fires here on back — this ref + explicit
+  // commitPendingEdit() call is the documented escape hatch for exactly that host (see
+  // ProfilesManagerHandle's own doc in @tastic/profile). Without it, a name typed but not yet
+  // submitted via the keyboard's Return/Done key is silently discarded on back.
+  const managerRef = useRef<ProfilesManagerHandle>(null)
+
+  const handleBack = () => {
+    managerRef.current?.commitPendingEdit()
+    safeBack()
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
       <ProfilesManager
+        ref={managerRef}
         profiles={profiles}
         defaultColor={DEFAULT_P1_COLOR}
         onCreate={(patch) => createProfile({ ...patch, keyScheme: NEW_PROFILE_KEY_SCHEME })}
@@ -41,7 +54,7 @@ export default function ProfilesScreen() {
           deleteProfile(id)
           removeProfileStats(id)
         }}
-        headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={safeBack} accessibilityLabel='Back' />}
+        headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={handleBack} accessibilityLabel='Back' />}
       />
     </View>
   )
