@@ -1,5 +1,6 @@
 import { getContrastColor } from '@rific/auto-paper'
 import { Canvas, Circle, Line, Path, Shadow, Skia, vec } from '@shopify/react-native-skia'
+import { cellKey, cellToPixel, isAdjacent } from '@tastic/grid'
 import { MysteryPickup, ObstacleRect } from '@tastic/sprites/shapes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -7,7 +8,6 @@ import { Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withTi
 
 import { deathAnimationDurationMs, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, Portal, PowerupPickup, Tunnel } from '@/types'
-import { cellKey, cellToPixel, isAdjacent } from '@/utils/grid'
 import { zoneSideFor } from '@/utils/playerZones'
 
 export interface GameBoardProps {

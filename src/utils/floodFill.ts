@@ -1,6 +1,6 @@
-import { GridCell, GridSize } from '@/types'
+import { ALL_DIRECTIONS, cellKey, isInBounds, stepCell, wrapCell } from '@tastic/grid'
 
-import { ALL_DIRECTIONS, cellKey, isInBounds, stepCell, wrapCell } from './grid'
+import { GridCell, GridSize } from '@/types'
 
 // 4-directional BFS from `start`, counting cells reachable without crossing `occupied` or the
 // grid edge — the "how much room is left to survive in" heuristic cpuAi.ts scores each candidate

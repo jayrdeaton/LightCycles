@@ -1,8 +1,9 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Toaster, ToastProvider } from '@rific/toaster'
-import { AccelerometerOrientationProvider, getViewRotation, useAccelerometerOrientation } from '@tastic/split-screen'
+import { getViewRotation, OrientationProvider, useOrientationState } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
+import { DeviceMotion } from 'expo-sensors'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
 import { useEffect } from 'react'
@@ -54,8 +55,8 @@ function AppStack() {
 // app tree (AppStack included) on every commit, the same isolation MatchOverlays uses in game.tsx
 // for the identical reason.
 //
-// The real OS status bar can't rotate with our own virtual content rotation (see
-// @tastic/split-screen's getViewRotation/FakeLandscapeView) — it's always pinned to the device's own
+// The real OS status bar can't rotate with our own virtual content rotation (see @tastic/core's
+// getViewRotation/@tastic/split-screen's FakeLandscapeView) — it's always pinned to the device's own
 // physical top edge — so once anything on screen is rotated away from normal right-side-up portrait,
 // it just reads as visually wrong (overlapping rotated content, sitting on a side edge in landscape,
 // etc.) rather than blending in. Hiding it whenever the live rotation isn't 0° sidesteps that
@@ -63,7 +64,7 @@ function AppStack() {
 // still layers on top of this one while mounted — expo-status-bar's own stack reverts to whichever
 // config is here once that more specific one unmounts.
 function RotationAwareStatusBar() {
-  const { orientationMode, p1OnRight, upsideDown } = useAccelerometerOrientation()
+  const { orientationMode, p1OnRight, upsideDown } = useOrientationState()
   const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
   return <StatusBar hidden={rotation !== 0} />
 }
@@ -82,7 +83,11 @@ export default function RootLayout() {
                     single app-lifetime sensor subscription is what makes the committed orientation
                     survive screen navigation, instead of each screen's own hook instance
                     restarting from a default guess on every mount. */}
-                    <AccelerometerOrientationProvider>
+                    {/* @tastic/core's own OrientationProvider never imports expo-sensors itself (so
+                    packages with no interest in tilt tracking aren't forced to have it installed) —
+                    this app genuinely wants live tilt tracking, so it does its own real import and
+                    hands the resolved module in via this prop. */}
+                    <OrientationProvider deviceMotion={DeviceMotion}>
                       {/* Nested inside Theme so paper.useTheme() (called internally by Toaster/
                       ToastProvider once `paper` is injected) resolves the app's real live theme
                       rather than react-native-paper's own default — that's what makes a toast's
@@ -99,7 +104,7 @@ export default function RootLayout() {
                         regardless of what that default does in a future toaster version. */}
                         <Toaster historyButton={null} clearButton={null} limit={3} />
                       </ToastProvider>
-                    </AccelerometerOrientationProvider>
+                    </OrientationProvider>
                   </ProfilesProvider>
                 </GameStatsProvider>
               </GameSettingsProvider>

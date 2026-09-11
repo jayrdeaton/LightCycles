@@ -1,8 +1,8 @@
 import { getBlendedColor, useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
-import { computeContentBounds } from '@tastic/core'
-import { getFixedZoneRotation, needsSharedNeutralZone, useAccelerometerOrientation } from '@tastic/split-screen'
+import { computeContentBounds, getFixedZoneRotation, useOrientationState } from '@tastic/core'
+import { needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -317,7 +317,7 @@ interface MatchOverlaysProps {
 // lined up with where a player could actually touch. FakeLandscapeView is still the right tool for
 // genuinely-whole-screen content with no fixed shape to match — just not this.
 function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmBackVisible, onCancelConfirmBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
-  const liveOrientation = useAccelerometerOrientation()
+  const liveOrientation = useOrientationState()
   // getFixedZoneRotation, not getViewRotation directly — this board's own zones are frozen forever
   // at 'faceToFace'/true (see GameRound), never reflowing no matter which way the device is spun
   // while flat, which is exactly the layout getFixedZoneRotation is for (see its own doc): a genuine

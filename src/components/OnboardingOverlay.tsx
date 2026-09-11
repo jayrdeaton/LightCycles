@@ -1,4 +1,4 @@
-import { getOpposingZoneRotation, ViewRotation } from '@tastic/split-screen'
+import { getOpposingZoneRotation, ViewRotation } from '@tastic/core'
 import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
@@ -14,7 +14,7 @@ export interface OnboardingOverlayProps {
   orientationMode: OrientationMode
   // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
   p1OnRight: boolean
-  // Live physical-hold rotation (see @tastic/split-screen's getViewRotation) — applied to the
+  // Live physical-hold rotation (see @tastic/core's getViewRotation) — applied to the
   // countdown text itself, NOT the zone it sits in. Deliberately not a FakeLandscapeView wrapper
   // around this whole component: that swaps width/height to fake a landscape-shaped screen, which
   // is right for the lobby's genuinely-wide layout but wrong here — these zones must stay exactly

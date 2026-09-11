@@ -1,8 +1,10 @@
+import { cellKey, computeGridSize, isAdjacent, isInBounds } from '@tastic/grid'
+
 import { GRID_CELL_PX } from '@/constants/game'
 import { ArenaVariant, GridCell, GridSizeTier, OrientationMode } from '@/types'
 import { buildArenaObstacles, buildArenaPortals, buildArenaTunnels, GAUNTLET_MIN_ALONG_LENGTH, GAUNTLET_MIN_CROSS_LENGTH, GAUNTLET_SPAWN_CLEARANCE_CELLS, PILLAR_MIN_ALONG_LENGTH, PILLAR_MIN_CROSS_LENGTH, PILLAR_SPAWN_CLEARANCE_CELLS, PORTAL_MIN_COLS, PORTAL_MIN_PAIR_DISTANCE_CELLS, PORTAL_MIN_ROWS, PORTAL_SPAWN_CLEARANCE_CELLS, TUNNEL_LENGTH_CELLS, TUNNEL_MIN_ALONG_LENGTH, TUNNEL_MIN_CROSS_LENGTH, TUNNEL_SPAWN_CLEARANCE_CELLS } from '@/utils/arenas'
 import { distanceToNearestTarget } from '@/utils/floodFill'
-import { cellKey, computeGridSize, isAdjacent, isInBounds, startingStateFor } from '@/utils/grid'
+import { startingStateFor } from '@/utils/grid'
 
 function chebyshev(a: GridCell, b: GridCell): number {
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y))

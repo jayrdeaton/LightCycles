@@ -1,6 +1,7 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
+import { getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
 import { CornerActionButtons, MenuOption, PressAwayOverlay, ReadyButton, SharedActionBand, usePopoverHost } from '@tastic/hud'
-import { DualZoneLayout, FakeLandscapeView, getViewRotation, needsSharedNeutralZone, rotateInsets, useAccelerometerOrientation, useDualZoneLayout } from '@tastic/split-screen'
+import { DualZoneLayout, FakeLandscapeView, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -116,13 +117,13 @@ export default function LobbyScreen() {
   // updateProfile is only ever called from here now — see handleP1KeySchemeChange etc. for the one
   // field (key scheme) still synced back while a profile stays selected, and
   // handleP1ColorChange's own doc for why color deliberately isn't.
-  // orientationMode just follows the device's own physical tilt (see useAccelerometerOrientation),
+  // orientationMode just follows the device's own physical tilt (see useOrientationState),
   // CPU games included — how you're holding the phone right now decides the layout, not a stored
   // per-round choice. This is what actually lets two players sit shoulder-to-shoulder and pick a
   // color/control scheme at the same time once the phone is turned sideways, instead of squeezing
   // two panels into a portrait-narrow row — and for vs-CPU, it's simply whichever way the solo
   // player is holding it. Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
-  const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useAccelerometerOrientation(settings.lockOrientation)
+  const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useOrientationState(settings.lockOrientation)
 
   // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
   // behind the live orientationMode/p1OnRight/upsideDown above — see useDualZoneLayout's own

@@ -1,6 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button } from '@rific/feedback-press'
-import { getOpposingZoneRotation, ViewRotation } from '@tastic/split-screen'
+import { getOpposingZoneRotation, ViewRotation } from '@tastic/core'
 import { StyleSheet, View } from 'react-native'
 import { Icon, Text } from 'react-native-paper'
 
@@ -11,7 +11,7 @@ export interface RoundOverDialogProps {
   orientationMode: OrientationMode
   // Only meaningful when orientationMode === 'sideBySide' — see GameBoard.tsx's identical prop.
   p1OnRight: boolean
-  // Live physical-hold rotation (see @tastic/split-screen's getFixedZoneRotation), applied to each
+  // Live physical-hold rotation (see @tastic/core's getFixedZoneRotation), applied to each
   // player's own CARD, not their zone — the zone rect must stay exactly the shape TouchInputLayer's
   // matching (unrotated) hit zone already is, or the two stop lining up. Note this is about the LIVE
   // hold, not the `orientationMode` prop above (which is the board's own always-'faceToFace'

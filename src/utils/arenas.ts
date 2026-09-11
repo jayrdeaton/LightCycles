@@ -1,6 +1,8 @@
+import { isInBounds } from '@tastic/grid'
+
 import { ArenaVariant, GridCell, GridSize, OrientationMode, Portal, Tunnel } from '@/types'
 
-import { isInBounds, startingStateFor } from './grid'
+import { startingStateFor } from './grid'
 
 // ─── Pillars ────────────────────────────────────────────────────────────────
 // Below these thresholds (split-axis length / shared-axis length, in cells — see alongLengthFor/

@@ -1,8 +1,10 @@
+import { cellKey, computeGridSize, isInBounds, isOppositeDirection, stepCell, wrapCell } from '@tastic/grid'
+
 import { MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_COLLECT_RADIUS_CELLS, POWERUP_EFFECT_DURATION_TICKS, POWERUP_PRUNE_FRACTION, SPEED_RAMP_DECREMENT_MS, SPEED_RAMP_INTERVAL_MS, SPEED_RAMP_MIN_INTERVAL_MS } from '@/constants/game'
 import { ArenaVariant, ControlEffect, Direction, GameState, GridCell, GridSize, OrientationMode, Player, PlayerEffects, PlayerState, Portal, PowerupPickup, PowerupType, RoundOutcome, ShieldEffect, SpeedEffect, Tunnel } from '@/types'
 
 import { buildArenaObstacles, buildArenaPortals, buildArenaTunnels } from './arenas'
-import { cellKey, computeGridSize, isInBounds, isOppositeDirection, startingStateFor, stepCell, wrapCell } from './grid'
+import { startingStateFor } from './grid'
 
 function createPlayerState(grid: GridSize, player: Player, mode: OrientationMode, color: string, p1OnRight: boolean): PlayerState {
   const { head, direction } = startingStateFor(player, grid, mode, p1OnRight)

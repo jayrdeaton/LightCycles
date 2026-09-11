@@ -1,4 +1,7 @@
 import { AchievementDefinition as BaseAchievementDefinition, DayStreakState, OutcomeRecord, RoundResult, WinStreakState } from '@tastic/achievements'
+import type { GridCell, GridSize } from '@tastic/grid'
+
+export type { GridCell, GridSize }
 
 export type Player = 1 | 2
 
@@ -80,16 +83,6 @@ export interface PowerupPickup {
   // mystery-box style. Only revealed once collected, in the holder's own HUD badge.
   type: PowerupType
   cell: GridCell
-}
-
-export interface GridCell {
-  x: number
-  y: number
-}
-
-export interface GridSize {
-  cols: number
-  rows: number
 }
 
 // A linked pair of cells for the 'portals' arena (see utils/arenas.ts's buildArenaPortals) —

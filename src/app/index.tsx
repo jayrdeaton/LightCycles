@@ -1,6 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
-import { FakeLandscapeView, getViewRotation, rotateInsets, useAccelerometerOrientation } from '@tastic/split-screen'
+import { rotateInsets, useRotation } from '@tastic/core'
+import { FakeLandscapeView } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -13,14 +14,15 @@ import { GameMode } from '@/types'
 
 export default function HomeScreen() {
   const { settings, setSettings } = useGameSettings()
-  // No P1/P2 concept on this screen at all, but the rotation angle itself still needs the real
+  // Follows the device's current physical tilt (see @tastic/core's useOrientationState, which
+  // useRotation reads internally) — Lock Orientation (see SettingsDialog) is the opt-in for pinning
+  // it. No P1/P2 concept on this screen at all, but the rotation angle itself still needs the real
   // p1OnRight reading (which direction the device was actually turned) to pick the correct sign —
-  // see @tastic/split-screen's FakeLandscapeView/getViewRotation.
-  const { orientationMode, p1OnRight, upsideDown } = useAccelerometerOrientation(settings.lockOrientation)
+  // see @tastic/split-screen's FakeLandscapeView/@tastic/core's getViewRotation.
+  const rotation = useRotation(settings.lockOrientation)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { colors, dark } = useAutoPaperTheme()
-  const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
   // See lobby.tsx's identical comment: react-native-safe-area-context always reports insets
   // relative to the device's own fixed physical frame, so they need remapping onto whichever edge
   // they actually correspond to once FakeLandscapeView below visually rotates the content.
@@ -46,8 +48,11 @@ export default function HomeScreen() {
       {/* Reads correctly no matter which way the phone is actually being held — see
       @tastic/split-screen's FakeLandscapeView. SettingsDialog stays outside it (a centered
       Portal-rendered modal isn't affected by a local transform on an ancestor) but still gets the
-      same live `rotation` passed directly, rotating its own content in place instead. */}
-      <FakeLandscapeView orientationMode={orientationMode} p1OnRight={p1OnRight} upsideDown={upsideDown} style={styles.rotatable}>
+      same live `rotation` passed directly, rotating its own content in place instead. No explicit
+      orientationMode/p1OnRight/upsideDown here — this screen never needs the raw triple for
+      anything else, so FakeLandscapeView's own ambient useOrientationState(locked) read (the same
+      live source `rotation` above already comes from) is exactly equivalent. */}
+      <FakeLandscapeView locked={settings.lockOrientation} style={styles.rotatable}>
         <IconButton icon='trophy' iconColor={fg} size={24} style={[styles.topLeft, { top: 8 + rotatedInsets.top, left: 8 + rotatedInsets.left }]} onPress={() => router.push('/achievements')} accessibilityLabel='Stats & Achievements' />
         <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + rotatedInsets.top, right: 8 + rotatedInsets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 

@@ -1,6 +1,8 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
+import { rotateInsets, useRotation } from '@tastic/core'
 import { AchievementRow, BaseStatsScreen, LOCKED_BADGE_COLOR, StatRow, StatSection, usePopoverHost } from '@tastic/hud'
 import { ProfileChip, ProfilePicker } from '@tastic/profile'
+import { FakeLandscapeView } from '@tastic/split-screen'
 import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { ActivityIndicator, Icon, Text } from 'react-native-paper'
@@ -95,7 +97,13 @@ function ProfileRankingRow({ ranking, fg, fgMuted }: ProfileRankingRowProps) {
 
 export default function AchievementsScreen() {
   const { dark, colors: themeColors } = useAutoPaperTheme()
-  const insets = useSafeAreaInsets()
+  // Unlike index.tsx/lobby.tsx/game.tsx, this screen previously had no orientation handling at
+  // all — it always rendered right-side-up regardless of how the phone was actually being held,
+  // the one screen in the app that didn't rotate along with everywhere else. rotateInsets remaps
+  // the device's own raw (never-rotated) safe-area reading onto whichever edge it actually
+  // corresponds to once FakeLandscapeView below visually rotates the content.
+  const rotation = useRotation()
+  const insets = rotateInsets(useSafeAreaInsets(), rotation)
   const { stats, unlockedAchievements, loaded, resetAll } = useGameStats()
   const { profiles } = useProfiles()
   // Same ProfilePicker used to select a profile per-seat in the lobby (see LobbyPlayerPanel.tsx) —
@@ -138,99 +146,103 @@ export default function AchievementsScreen() {
   // real to confirm against.
   if (!loaded) {
     return (
-      <BaseStatsScreen onBack={safeBack} insets={insets}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={themeColors.primary} />
-        </View>
-      </BaseStatsScreen>
+      <FakeLandscapeView style={styles.rotatable}>
+        <BaseStatsScreen onBack={safeBack} insets={insets} rotation={rotation}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color={themeColors.primary} />
+          </View>
+        </BaseStatsScreen>
+      </FakeLandscapeView>
     )
   }
 
   return (
-    <BaseStatsScreen onBack={safeBack} insets={insets} onReset={resetAll}>
-      {profiles.length > 0 && <ProfilePicker idPrefix='achievements' host={profilePickerHost} profiles={profiles} selectedId={effectiveProfileId} color={themeColors.primary} dark={dark} guestLabel='All Profiles' nullLabel='All Profiles' nullIcon='account-group' onSelect={(profile) => setSelectedProfileId(profile?.id ?? null)} />}
+    <FakeLandscapeView style={styles.rotatable}>
+      <BaseStatsScreen onBack={safeBack} insets={insets} onReset={resetAll} rotation={rotation}>
+        {profiles.length > 0 && <ProfilePicker idPrefix='achievements' host={profilePickerHost} profiles={profiles} selectedId={effectiveProfileId} color={themeColors.primary} dark={dark} guestLabel='All Profiles' nullLabel='All Profiles' nullIcon='account-group' onSelect={(profile) => setSelectedProfileId(profile?.id ?? null)} />}
 
-      <StatSection label='OVERALL'>
-        <StatRow label='Played' value={String(overall.played)} />
-        <StatRow label='Wins' value={String(overall.wins)} />
-        <StatRow label='Losses' value={String(overall.losses)} />
-        <StatRow label='Draws' value={String(overall.draws)} />
-      </StatSection>
+        <StatSection label='OVERALL'>
+          <StatRow label='Played' value={String(overall.played)} />
+          <StatRow label='Wins' value={String(overall.wins)} />
+          <StatRow label='Losses' value={String(overall.losses)} />
+          <StatRow label='Draws' value={String(overall.draws)} />
+        </StatSection>
 
-      <StatSection label='VS CPU'>
-        <StatRow label='Record (W-L-D)' value={`${statsView.vsCpu.wins}-${statsView.vsCpu.losses}-${statsView.vsCpu.draws}`} />
-        <StatRow label='Current Streak' value={String(statsView.vsCpu.currentWinStreak)} />
-        <StatRow label='Best Streak' value={String(statsView.vsCpu.bestWinStreak)} />
-      </StatSection>
+        <StatSection label='VS CPU'>
+          <StatRow label='Record (W-L-D)' value={`${statsView.vsCpu.wins}-${statsView.vsCpu.losses}-${statsView.vsCpu.draws}`} />
+          <StatRow label='Current Streak' value={String(statsView.vsCpu.currentWinStreak)} />
+          <StatRow label='Best Streak' value={String(statsView.vsCpu.bestWinStreak)} />
+        </StatSection>
 
-      {/* All Profiles keeps today's original seat-framing (whoever sat where, regardless of
+        {/* All Profiles keeps today's original seat-framing (whoever sat where, regardless of
       profile) — a selected profile switches to that profile's own personal record instead
       (p1Wins+p2Wins is always THIS profile's own win count, see types/index.ts's ProfileStats doc
       comment), matching how every other section already frames things personally once a profile
       is selected. */}
-      <StatSection label='TWO PLAYER (LOCAL)'>
-        {profileBucket ? (
-          <>
-            <StatRow label='Played' value={String(statsView.twoPlayer.played)} />
-            <StatRow label='Wins' value={String(statsView.twoPlayer.p1Wins + statsView.twoPlayer.p2Wins)} />
-            <StatRow label='Losses' value={String(statsView.twoPlayer.played - statsView.twoPlayer.p1Wins - statsView.twoPlayer.p2Wins - statsView.twoPlayer.draws)} />
-            <StatRow label='Draws' value={String(statsView.twoPlayer.draws)} />
-          </>
-        ) : (
-          <>
-            <StatRow label='Played' value={String(stats.twoPlayer.played)} />
-            <StatRow label='Seat 1 Wins' value={String(stats.twoPlayer.p1Wins)} />
-            <StatRow label='Seat 2 Wins' value={String(stats.twoPlayer.p2Wins)} />
-            <StatRow label='Draws' value={String(stats.twoPlayer.draws)} />
-          </>
-        )}
-      </StatSection>
-
-      {sortedColors.length > 0 && (
-        <StatSection label='COLORS (W-L-D)'>
-          {sortedColors.map(([hex, colorStats]) => (
-            <ColorStatRow key={hex} hex={hex} colorStats={colorStats} isFavorite={hex === favoriteColor} isBest={hex === bestColor} fg={fg} fgMuted={fgMuted} />
-          ))}
+        <StatSection label='TWO PLAYER (LOCAL)'>
+          {profileBucket ? (
+            <>
+              <StatRow label='Played' value={String(statsView.twoPlayer.played)} />
+              <StatRow label='Wins' value={String(statsView.twoPlayer.p1Wins + statsView.twoPlayer.p2Wins)} />
+              <StatRow label='Losses' value={String(statsView.twoPlayer.played - statsView.twoPlayer.p1Wins - statsView.twoPlayer.p2Wins - statsView.twoPlayer.draws)} />
+              <StatRow label='Draws' value={String(statsView.twoPlayer.draws)} />
+            </>
+          ) : (
+            <>
+              <StatRow label='Played' value={String(stats.twoPlayer.played)} />
+              <StatRow label='Seat 1 Wins' value={String(stats.twoPlayer.p1Wins)} />
+              <StatRow label='Seat 2 Wins' value={String(stats.twoPlayer.p2Wins)} />
+              <StatRow label='Draws' value={String(stats.twoPlayer.draws)} />
+            </>
+          )}
         </StatSection>
-      )}
 
-      {/* A leaderboard comparing every profile — inherently a cross-profile question, so it only
+        {sortedColors.length > 0 && (
+          <StatSection label='COLORS (W-L-D)'>
+            {sortedColors.map(([hex, colorStats]) => (
+              <ColorStatRow key={hex} hex={hex} colorStats={colorStats} isFavorite={hex === favoriteColor} isBest={hex === bestColor} fg={fg} fgMuted={fgMuted} />
+            ))}
+          </StatSection>
+        )}
+
+        {/* A leaderboard comparing every profile — inherently a cross-profile question, so it only
       makes sense on "All Profiles"; once you've drilled into one profile's own tab it's answering
       a different question than the one you just asked. */}
-      {effectiveProfileId === null && rankings.length > 0 && (
-        <StatSection label='PLAYER RANKINGS'>
-          {rankings.map((ranking) => (
-            <ProfileRankingRow key={ranking.profile.id} ranking={ranking} fg={fg} fgMuted={fgMuted} />
-          ))}
+        {effectiveProfileId === null && rankings.length > 0 && (
+          <StatSection label='PLAYER RANKINGS'>
+            {rankings.map((ranking) => (
+              <ProfileRankingRow key={ranking.profile.id} ranking={ranking} fg={fg} fgMuted={fgMuted} />
+            ))}
+          </StatSection>
+        )}
+
+        <StatSection label='ACTIVITY'>
+          <StatRow label='Days Played' value={String(statsView.distinctDaysPlayed)} />
+          <StatRow label='Day Streak' value={String(statsView.currentDayStreak)} />
+          <StatRow label='Best Day Streak' value={String(statsView.bestDayStreak)} />
         </StatSection>
-      )}
 
-      <StatSection label='ACTIVITY'>
-        <StatRow label='Days Played' value={String(statsView.distinctDaysPlayed)} />
-        <StatRow label='Day Streak' value={String(statsView.currentDayStreak)} />
-        <StatRow label='Best Day Streak' value={String(statsView.bestDayStreak)} />
-      </StatSection>
-
-      <Text variant='labelMedium' style={[styles.listLabel, { color: fgMuted, fontFamily: MONO_FONT }]}>
-        ALL ACHIEVEMENTS
-      </Text>
-      {ACHIEVEMENT_CATALOG.map((achievement) => {
-        // scope:'device' (currently just flawless_debut — see its own doc comment in
-        // constants/achievements.ts) always evaluates against the real device StatsState and its
-        // bare-id unlock key, regardless of which tab is active — every other achievement follows
-        // whichever view is currently selected. When effectiveProfileId is null (All Profiles),
-        // this collapses to exactly today's original computation: evalStats === stats and
-        // key === achievement.id either way.
-        const scope = achievement.scope ?? 'profile'
-        const evalStats = scope === 'device' ? stats : statsView
-        const key = unlockedKey(achievement.id, scope === 'device' ? null : effectiveProfileId)
-        const unlockedAt = unlockedAchievements[key]
-        const progress = unlockedAt === undefined ? achievement.progress?.(evalStats) : undefined
-        const tierColor = ACHIEVEMENT_TIER_COLORS[achievement.tier]
-        const showsDeviceMarker = effectiveProfileId !== null && scope === 'device'
-        return <AchievementRow key={achievement.id} icon={achievement.icon} title={achievement.title} description={achievement.description} badgeColor={unlockedAt !== undefined ? tierColor : LOCKED_BADGE_COLOR} checkColor={tierColor} unlockedLabel={unlockedAt !== undefined ? unlockedLabel(unlockedAt) : undefined} progress={progress} deviceMarker={showsDeviceMarker} />
-      })}
-    </BaseStatsScreen>
+        <Text variant='labelMedium' style={[styles.listLabel, { color: fgMuted, fontFamily: MONO_FONT }]}>
+          ALL ACHIEVEMENTS
+        </Text>
+        {ACHIEVEMENT_CATALOG.map((achievement) => {
+          // scope:'device' (currently just flawless_debut — see its own doc comment in
+          // constants/achievements.ts) always evaluates against the real device StatsState and its
+          // bare-id unlock key, regardless of which tab is active — every other achievement follows
+          // whichever view is currently selected. When effectiveProfileId is null (All Profiles),
+          // this collapses to exactly today's original computation: evalStats === stats and
+          // key === achievement.id either way.
+          const scope = achievement.scope ?? 'profile'
+          const evalStats = scope === 'device' ? stats : statsView
+          const key = unlockedKey(achievement.id, scope === 'device' ? null : effectiveProfileId)
+          const unlockedAt = unlockedAchievements[key]
+          const progress = unlockedAt === undefined ? achievement.progress?.(evalStats) : undefined
+          const tierColor = ACHIEVEMENT_TIER_COLORS[achievement.tier]
+          const showsDeviceMarker = effectiveProfileId !== null && scope === 'device'
+          return <AchievementRow key={achievement.id} icon={achievement.icon} title={achievement.title} description={achievement.description} badgeColor={unlockedAt !== undefined ? tierColor : LOCKED_BADGE_COLOR} checkColor={tierColor} unlockedLabel={unlockedAt !== undefined ? unlockedLabel(unlockedAt) : undefined} progress={progress} deviceMarker={showsDeviceMarker} />
+        })}
+      </BaseStatsScreen>
+    </FakeLandscapeView>
   )
 }
 
@@ -251,6 +263,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 48
+  },
+  rotatable: {
+    flex: 1
   },
   statRow: {
     alignItems: 'center',
