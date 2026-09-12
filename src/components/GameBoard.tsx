@@ -1,4 +1,3 @@
-import { getContrastColor } from '@rific/auto-paper'
 import { Canvas, Circle, Line, Path, Shadow, Skia, vec } from '@shopify/react-native-skia'
 import { cellKey, cellToPixel, isAdjacent } from '@tastic/grid'
 import { MysteryPickup, ObstacleRect } from '@tastic/sprites/shapes'
@@ -736,7 +735,10 @@ function PlayerTrail({ player, tickIntervalMs, cellPx, tick, trailSpeedRate, tun
           once the tail segment already spans tail-to-head on its own. */}
           {trail.length > 2 && <Line p1={edgeStart} p2={edgeEnd} strokeWidth={trailWidth} strokeCap='round' color={player.color} />}
           <Circle cx={animX} cy={animY} r={headRadius} color={player.color} />
-          <Circle cx={animX} cy={animY} r={headRadius} style='stroke' strokeWidth={1.5} color={getContrastColor(player.color)} />
+          {/* Always white, not getContrastColor(player.color) — that picks black for light
+          colors like yellow, which blends into the dark board background instead of standing
+          out against it. */}
+          <Circle cx={animX} cy={animY} r={headRadius} style='stroke' strokeWidth={1.5} color='#ffffff' />
           {/* Active-effect "tell" rings, nested at increasing radii so more than one at once
           (e.g. Shield popped while already Overclocked) stays visually distinguishable rather
           than overlapping exactly. Colored by what's actually driving the effect (see

@@ -1,4 +1,3 @@
-import { getContrastColor } from '@rific/auto-paper'
 import { Canvas, Circle, Path, Skia, vec } from '@shopify/react-native-skia'
 import { useEffect, useMemo } from 'react'
 import { StyleSheet } from 'react-native'
@@ -154,8 +153,6 @@ function WordTrail({ box, color, clockwise, active, trailLengthPx, startDelayMs 
     return vec(pos.x, pos.y)
   })
 
-  const contrastColor = useMemo(() => getContrastColor(color), [color])
-
   if (!active) {
     return <Path path={path} style='stroke' strokeWidth={TRAIL_STROKE_WIDTH} strokeCap='round' strokeJoin='round' color={color} opacity={STATIC_TRAIL_OPACITY} />
   }
@@ -166,7 +163,9 @@ function WordTrail({ box, color, clockwise, active, trailLengthPx, startDelayMs 
       <Path path={path} start={startB} end={endB} style='stroke' strokeWidth={TRAIL_STROKE_WIDTH} strokeCap='round' strokeJoin='round' color={color} />
 
       <Circle c={headPos} r={HEAD_RADIUS} color={color} />
-      <Circle c={headPos} r={HEAD_RADIUS} style='stroke' strokeWidth={HEAD_RING_WIDTH} color={contrastColor} />
+      {/* Always white, not getContrastColor(color) — that picks black for light colors like
+      yellow, which blends into the dark hero background instead of standing out against it. */}
+      <Circle c={headPos} r={HEAD_RADIUS} style='stroke' strokeWidth={HEAD_RING_WIDTH} color='#ffffff' />
     </>
   )
 }
