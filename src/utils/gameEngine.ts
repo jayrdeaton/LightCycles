@@ -11,10 +11,33 @@ function createPlayerState(grid: GridSize, player: Player, mode: OrientationMode
   return { trail: [head], direction, pendingDirection: null, alive: true, color, heldPowerup: null, effects: { speed: null, control: null, shield: null }, crashCell: null }
 }
 
+// The grid-cell margin along each edge that falls inside the device's own safe-area inset —
+// `insetsPx` is expected to already be zeroed out by the caller (see GameScreen's own
+// extendIntoSafeArea branch) whenever the board ISN'T bleeding under it, since otherwise the
+// board's pixel container already stops short of the inset and every cell is already clear of it;
+// this function itself stays agnostic of that setting. Ceil'd up to whole cells so a pickup can
+// never spawn partially under the notch/Dynamic Island/home-indicator/speaker cutout — better to
+// lose a cell of margin than leave one still hidden.
+function buildUnsafeAreaCells(grid: GridSize, cellPx: number, insetsPx: { top: number; right: number; bottom: number; left: number }): GridCell[] {
+  const marginTop = Math.ceil(insetsPx.top / cellPx)
+  const marginBottom = Math.ceil(insetsPx.bottom / cellPx)
+  const marginLeft = Math.ceil(insetsPx.left / cellPx)
+  const marginRight = Math.ceil(insetsPx.right / cellPx)
+  if (marginTop <= 0 && marginBottom <= 0 && marginLeft <= 0 && marginRight <= 0) return []
+  const cells: GridCell[] = []
+  for (let x = 0; x < grid.cols; x++) {
+    for (let y = 0; y < grid.rows; y++) {
+      if (x < marginLeft || x >= grid.cols - marginRight || y < marginTop || y >= grid.rows - marginBottom) cells.push({ x, y })
+    }
+  }
+  return cells
+}
+
 // `arenaVariant` defaults to 'open' (the original, fully-open rectangle — buildArenaObstacles
 // returns [] for it immediately) so every existing call site, including every current test that
-// predates arenas, keeps compiling and stays byte-identical in behavior.
-export function createInitialGameState(width: number, height: number, mode: OrientationMode, colors: Record<Player, string>, cellPx: number, p1OnRight: boolean, arenaVariant: ArenaVariant = 'open'): GameState {
+// predates arenas, keeps compiling and stays byte-identical in behavior. `safeAreaInsetsPx`
+// defaults to all-zero (no margin) for the same reason — see buildUnsafeAreaCells above.
+export function createInitialGameState(width: number, height: number, mode: OrientationMode, colors: Record<Player, string>, cellPx: number, p1OnRight: boolean, arenaVariant: ArenaVariant = 'open', safeAreaInsetsPx: { top: number; right: number; bottom: number; left: number } = { top: 0, right: 0, bottom: 0, left: 0 }): GameState {
   const grid = computeGridSize(width, height, cellPx)
   return {
     phase: 'onboarding',
@@ -28,7 +51,8 @@ export function createInitialGameState(width: number, height: number, mode: Orie
     pickups: [],
     obstacles: buildArenaObstacles(arenaVariant, grid, mode, p1OnRight),
     portals: buildArenaPortals(arenaVariant, grid, mode, p1OnRight),
-    tunnels: buildArenaTunnels(arenaVariant, grid, mode, p1OnRight)
+    tunnels: buildArenaTunnels(arenaVariant, grid, mode, p1OnRight),
+    unsafeCells: buildUnsafeAreaCells(grid, cellPx, safeAreaInsetsPx)
   }
 }
 
@@ -184,17 +208,20 @@ function hasClearCollectionArea(cell: GridCell, grid: GridSize, occupied: Readon
 }
 
 // Only ever called with an empty `pickups` (see maybeSpawnPickup's own guard), so there's no
-// "avoid the other live pickup's cell" case to account for here. `portalCells`/`tunnelCells` both
-// default to empty so every existing call site/test (predating portals/tunnels) stays byte-
-// identical — neither a portal cell nor a tunnel cell is itself ever in `occupied` (see
-// buildPortalLookup's own comment, and buildOccupiedSet's tunnel exclusion above), so without this
-// a pickup could otherwise spawn directly on a portal mouth or a live tunnel cell.
-function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, random: () => number, portalCells: ReadonlySet<string> = new Set(), tunnelCells: ReadonlySet<string> = new Set()): GridCell | null {
+// "avoid the other live pickup's cell" case to account for here. `portalCells`/`tunnelCells`/
+// `unsafeCells` all default to empty so every existing call site/test (predating portals/tunnels/
+// safe-area avoidance) stays byte-identical — neither a portal cell nor a tunnel cell is itself
+// ever in `occupied` (see buildPortalLookup's own comment, and buildOccupiedSet's tunnel exclusion
+// above), so without this a pickup could otherwise spawn directly on a portal mouth or a live
+// tunnel cell. `unsafeCells` (see buildUnsafeAreaCells) is the device safe-area margin — same
+// treatment, since a cell inside it is still fully traversable board, just not somewhere a pickup
+// should ever land.
+function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, random: () => number, portalCells: ReadonlySet<string> = new Set(), tunnelCells: ReadonlySet<string> = new Set(), unsafeCells: ReadonlySet<string> = new Set()): GridCell | null {
   const candidates: GridCell[] = []
   for (let x = 0; x < grid.cols; x++) {
     for (let y = 0; y < grid.rows; y++) {
       const cell = { x, y }
-      if (portalCells.has(cellKey(cell)) || tunnelCells.has(cellKey(cell))) continue
+      if (portalCells.has(cellKey(cell)) || tunnelCells.has(cellKey(cell)) || unsafeCells.has(cellKey(cell))) continue
       if (hasClearCollectionArea(cell, grid, occupied)) candidates.push(cell)
     }
   }
@@ -209,10 +236,10 @@ function pickRandomEmptyCell(grid: GridSize, occupied: ReadonlySet<string>, rand
 // cycle that just moved there. `enabledPowerups` is the per-round selection from GameSettings — an
 // empty list (the "powerups off" case, see GameSettings' own comment) means this never spawns
 // anything at all.
-function maybeSpawnPickup(grid: GridSize, tick: number, pickups: PowerupPickup[], occupied: ReadonlySet<string>, enabledPowerups: PowerupType[], random: () => number, portalCells: ReadonlySet<string> = new Set(), tunnelCells: ReadonlySet<string> = new Set()): PowerupPickup[] {
+function maybeSpawnPickup(grid: GridSize, tick: number, pickups: PowerupPickup[], occupied: ReadonlySet<string>, enabledPowerups: PowerupType[], random: () => number, portalCells: ReadonlySet<string> = new Set(), tunnelCells: ReadonlySet<string> = new Set(), unsafeCells: ReadonlySet<string> = new Set()): PowerupPickup[] {
   if (enabledPowerups.length === 0) return pickups
   if (pickups.length > 0) return pickups
-  const cell = pickRandomEmptyCell(grid, occupied, random, portalCells, tunnelCells)
+  const cell = pickRandomEmptyCell(grid, occupied, random, portalCells, tunnelCells, unsafeCells)
   if (!cell) return pickups
   const type = enabledPowerups[Math.floor(random() * enabledPowerups.length)]
   return [...pickups, { id: pickupId(tick, cell), type, cell }]
@@ -513,7 +540,7 @@ export function tickGame(state: GameState, occupied: ReadonlySet<string> = build
   if (trimDue && steps1 > 0 && trail1.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail1 = trimTrailFront(trail1, 1)
   if (trimDue && steps2 > 0 && trail2.length > MIN_TRAIL_LENGTH_BEFORE_TRIM) trail2 = trimTrailFront(trail2, 1)
 
-  const spawnedPickups = maybeSpawnPickup(grid, tick, pickups, working, enabledPowerups, random, new Set(portalLookup.keys()), tunnelCellSet)
+  const spawnedPickups = maybeSpawnPickup(grid, tick, pickups, working, enabledPowerups, random, new Set(portalLookup.keys()), tunnelCellSet, new Set(state.unsafeCells.map(cellKey)))
 
   // Effect expiry — cleared once `tick` has fully consumed the effect's own expiresAtTick.
   const expire = (effects: PlayerEffects): PlayerEffects => ({

@@ -21,7 +21,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     pickups: [],
     obstacles: [],
     portals: [],
-    tunnels: []
+    tunnels: [],
+    unsafeCells: []
   }
   return { ...base, ...overrides }
 }
@@ -58,6 +59,36 @@ describe('createInitialGameState', () => {
         expect(cell).not.toEqual(p2Head)
       }
     }
+  })
+})
+
+describe('createInitialGameState safe-area margin', () => {
+  it('defaults to no unsafeCells when safeAreaInsetsPx is omitted', () => {
+    const state = createInitialGameState(200, 200, 'faceToFace', { 1: '#3B82F6', 2: '#EF4444' }, 10, true)
+    expect(state.unsafeCells).toEqual([])
+  })
+
+  it('marks no cells unsafe when safeAreaInsetsPx is explicitly all-zero', () => {
+    const state = createInitialGameState(200, 200, 'faceToFace', { 1: '#3B82F6', 2: '#EF4444' }, 10, true, 'open', { top: 0, right: 0, bottom: 0, left: 0 })
+    expect(state.unsafeCells).toEqual([])
+  })
+
+  it('marks the ceil(inset/cellPx) cells along each edge unsafe, and none of the interior', () => {
+    // A 10x10 grid at cellPx=10: a 25px top inset and 15px left inset round up to 3 and 2 cells
+    // respectively (ceil(25/10)=3, ceil(15/10)=2) — anything less than a full cell of overlap still
+    // counts as unsafe, since a pickup only partially clear of the notch/Dynamic Island/speaker
+    // cutout is still partially hidden by it.
+    const state = createInitialGameState(100, 100, 'faceToFace', { 1: '#3B82F6', 2: '#EF4444' }, 10, true, 'open', { top: 25, right: 0, bottom: 0, left: 15 })
+    const unsafe = new Set(state.unsafeCells.map((c) => `${c.x},${c.y}`))
+    expect(state.grid).toEqual({ cols: 10, rows: 10 })
+    // Top margin (y < 3) and left margin (x < 2) are unsafe, everywhere else isn't.
+    expect(unsafe.has('5,0')).toBe(true)
+    expect(unsafe.has('5,2')).toBe(true)
+    expect(unsafe.has('0,5')).toBe(true)
+    expect(unsafe.has('1,5')).toBe(true)
+    expect(unsafe.has('5,3')).toBe(false)
+    expect(unsafe.has('2,5')).toBe(false)
+    expect(unsafe.has('9,9')).toBe(false)
   })
 })
 
@@ -683,6 +714,37 @@ describe('tickGame', () => {
             2: ps({ trail: [{ x: 10, y: 0 }], direction: 'right', effects: frozen })
           },
           portals: [{ a: { x: 0, y: 0 }, b: { x: 8, y: 0 } }]
+        })
+        const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
+        expect(next.pickups).toEqual([])
+      })
+
+      it('never spawns a pickup on a cell inside state.unsafeCells (the device safe-area margin), even when it would otherwise be the only clear candidates', () => {
+        // Same shape as the portal-exclusion test above: a 12-cell strip where the only trail-clear,
+        // collection-radius-clear gaps are x=0 and x=8 — here both are marked unsafe instead of
+        // being portal cells, so without the exclusion one of them is exactly where this would spawn.
+        const frozen: PlayerEffects = { speed: { type: 'stasis', multiplier: 0, expiresAtTick: 100 }, control: null, shield: null }
+        const state = makeState({
+          grid: { cols: 12, rows: 1 },
+          pickups: [],
+          players: {
+            1: ps({
+              trail: [
+                { x: 2, y: 0 },
+                { x: 3, y: 0 },
+                { x: 4, y: 0 },
+                { x: 5, y: 0 },
+                { x: 6, y: 0 }
+              ],
+              direction: 'right',
+              effects: frozen
+            }),
+            2: ps({ trail: [{ x: 10, y: 0 }], direction: 'right', effects: frozen })
+          },
+          unsafeCells: [
+            { x: 0, y: 0 },
+            { x: 8, y: 0 }
+          ]
         })
         const next = tickGame(state, undefined, 1, POWERUP_ALL_TYPES, () => 0)
         expect(next.pickups).toEqual([])

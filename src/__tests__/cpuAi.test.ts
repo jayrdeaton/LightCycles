@@ -194,7 +194,8 @@ describe('applyCpuTurn', () => {
       pickups: [],
       obstacles: [],
       portals: [],
-      tunnels: []
+      tunnels: [],
+      unsafeCells: []
     }
   }
 
@@ -238,7 +239,8 @@ describe('applyCpuTurn', () => {
       pickups: [],
       obstacles: [{ x: 1, y: 0 }],
       portals: [],
-      tunnels: []
+      tunnels: [],
+      unsafeCells: []
     }
     const next = applyCpuTurn(state, 'hard')
     expect(next.players[2].pendingDirection).toBe('right')
@@ -266,7 +268,8 @@ describe('applyCpuTurn', () => {
         { x: 7, y: 0 }
       ],
       portals: [{ a: { x: 2, y: 0 }, b: { x: 50, y: 0 } }],
-      tunnels: []
+      tunnels: [],
+      unsafeCells: []
     }
     const next = applyCpuTurn(state, 'hard')
     expect(next.players[2].pendingDirection).toBe('left')
@@ -291,7 +294,8 @@ describe('applyCpuTurn', () => {
       pickups: [],
       obstacles: [{ x: 34, y: 0 }],
       portals: [],
-      tunnels: [{ cells: [{ x: 29, y: 0 }] }]
+      tunnels: [{ cells: [{ x: 29, y: 0 }] }],
+      unsafeCells: []
     }
     const next = applyCpuTurn(state, 'hard')
     expect(next.players[2].pendingDirection).toBe('right')
@@ -349,7 +353,8 @@ describe('shouldCpuActivate', () => {
       pickups: [],
       obstacles: [],
       portals: [],
-      tunnels: []
+      tunnels: [],
+      unsafeCells: []
     }
   }
 

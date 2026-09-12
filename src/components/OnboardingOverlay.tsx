@@ -92,7 +92,7 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, rotation
     <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents='none'>
       {humanPlayers.length === 1 ? (
         <View style={[styles.zone, styles.zoneFull, { borderColor: humanPlayers[0] === 1 ? p1Color : p2Color, backgroundColor: `${humanPlayers[0] === 1 ? p1Color : p2Color}22` }]}>
-          <Text style={[styles.countdown, { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
+          <Text style={[styles.countdown, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
           {/* Stacked in normal flow below the digit (rather than the absolutely-centered overlay
           used for the two-zone case below) since a solo zone's countdown is already dead-center —
           overlaying pips there would sit right on top of the digit instead of under it. */}
@@ -105,14 +105,14 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, rotation
       ) : (
         <>
           <View style={[styles.zone, p1Zone, { borderColor: p1Color, backgroundColor: `${p1Color}22` }]}>
-            <Text style={[styles.countdown, { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
+            <Text style={[styles.countdown, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>{countdown}</Text>
           </View>
           <View style={[styles.zone, p2Zone, { borderColor: p2Color, backgroundColor: `${p2Color}22` }]}>
             {/* getOpposingZoneRotation, not the board's own always-'faceToFace' orientationMode above
             (that's structural — isFaceToFace is always true here, so it can never stand in for an
             actual live landscape hold) — see that function's own doc for why P2's digit only gets
             the +180 baseline flip in portrait, not landscape. */}
-            <Text style={[styles.countdown, { transform: [{ rotate: `${getOpposingZoneRotation(rotation)}deg` }] }]}>{countdown}</Text>
+            <Text style={[styles.countdown, getOpposingZoneRotation(rotation) % 360 !== 0 && { transform: [{ rotate: `${getOpposingZoneRotation(rotation)}deg` }] }]}>{countdown}</Text>
           </View>
 
           {roundHistory.length > 0 && (

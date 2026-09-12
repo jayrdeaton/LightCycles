@@ -61,9 +61,15 @@ export function useSeatColors() {
         // Per-field guarded, not a blanket skip-the-whole-load-if-anything-was-touched: a tap on the
         // guest swatch shouldn't also throw away a real persisted CPU color this same load was about
         // to seed, and vice versa.
+        //
+        // A CPU color that's never been explicitly set seeds from the guest p2 slot above (the same
+        // secondary color already driving the cold-boot theme in Theme.tsx), not the hardcoded
+        // DEFAULT_P2_COLOR — otherwise the very first trip into vsCpu mode after this seat gained its
+        // own storage slot would visibly clobber an already-customized secondary with stock red,
+        // instead of it just carrying over until the player picks a CPU color of its own.
         setState((prev) => ({
           guestColors: guestTouchedRef.current ? prev.guestColors : { 1: p1, 2: p2 },
-          cpuColor: cpuTouchedRef.current ? prev.cpuColor : isValidHex(storedCpu) ? storedCpu : DEFAULT_P2_COLOR,
+          cpuColor: cpuTouchedRef.current ? prev.cpuColor : isValidHex(storedCpu) ? storedCpu : p2,
           loaded: true
         }))
       })

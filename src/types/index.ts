@@ -191,6 +191,15 @@ export interface GameState {
   // buildArenaTunnels) — empty for every other variant. Computed once in createInitialGameState and
   // never mutated after, same as `obstacles`.
   tunnels: Tunnel[]
+  // Cells inside the round's device safe-area margin (see gameEngine.ts's buildUnsafeAreaCells) —
+  // only non-empty when the round is bleeding under that margin (extendIntoSafeArea; see
+  // GameSettings' own comment), since otherwise the board's own pixel container already stops short
+  // of the inset and every cell is already clear of it. A pickup never spawns here (see
+  // maybeSpawnPickup) because a notch/Dynamic Island/home-indicator/speaker cutout can physically
+  // hide it there — the board itself stays fully traversable, same as any other cosmetically-
+  // obscured cell. Computed once in createInitialGameState and never mutated after, same as
+  // `obstacles`.
+  unsafeCells: GridCell[]
 }
 
 export interface TurnIntentEvent {

@@ -7,11 +7,12 @@ import { applyActivation, applyTurnIntent, buildOccupiedSet, buildTunnelCellSet,
 
 // orientationMode/p1OnRight are passed separately rather than read off `settings` — they're
 // derived live from the device's own physical tilt (see useAccelerometerOrientation), not a stored
-// setting.
-export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode, p1OnRight: boolean) {
+// setting. safeAreaInsetsPx defaults to all-zero — see GameRound's own comment on GameRoundProps
+// for why the caller is what decides whether it's actually the device's real insets or zeroed out.
+export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode, p1OnRight: boolean, safeAreaInsetsPx: { top: number; right: number; bottom: number; left: number } = { top: 0, right: 0, bottom: 0, left: 0 }) {
   const cellPx = GRID_CELL_PX[settings.gridSizeTier]
 
-  const [state, setState] = useState(() => createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant))
+  const [state, setState] = useState(() => createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant, safeAreaInsetsPx))
   // The interval the *last* tick actually advanced by — exposed so the board can animate each
   // player's head gliding into its new cell over exactly that duration (see GameBoard.tsx) instead
   // of snapping, which is what made a low-ish tick rate read as choppy even though the underlying
@@ -32,8 +33,8 @@ export function useGameState(width: number, height: number, settings: GameSettin
   }, [])
 
   const rematch = useCallback(() => {
-    setState(createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant))
-  }, [width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant])
+    setState(createInitialGameState(width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant, safeAreaInsetsPx))
+  }, [width, height, orientationMode, colors, cellPx, p1OnRight, settings.arenaVariant, safeAreaInsetsPx])
 
   // ─── Tick loop ──────────────────────────────────────────────────────────
   // Runs only while 'playing' (the effect's own [state.phase] dependency tears it down the

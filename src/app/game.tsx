@@ -1,8 +1,8 @@
 import { getBlendedColor, useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
-import { computeContentBounds, getFixedZoneRotation, useOrientationState } from '@tastic/core'
-import { needsSharedNeutralZone } from '@tastic/split-screen'
+import { computeContentBounds, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
+import { FakeLandscapeView, needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -29,6 +29,11 @@ import { AchievementDefinition, Direction, GameMode, GamePhase, GameSettings, Or
 import { humanPlayersFor } from '@/utils/gameParams'
 import { safeBack } from '@/utils/navigation'
 
+// A stable, referentially-constant all-zero insets object — see safeAreaInsetsPx's own comment
+// below for why the board passes this instead of the device's real insets whenever it isn't
+// actually bleeding under them.
+const ZERO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 }
+
 interface GameRoundProps {
   // The board's one-time DESIGN measurement (see GameScreen's boardSize.design) — read once, at
   // mount, via GameRound's own lazy useState below, same treatment as orientationMode/p1OnRight
@@ -50,6 +55,14 @@ interface GameRoundProps {
   // above ever finding out anything changed.
   liveWidth: number
   liveHeight: number
+  // The device's real safe-area insets in px, but ONLY when this round is actually bleeding under
+  // them (extendIntoSafeArea — see GameScreen's own boardArea style) — GameScreen passes all-zero
+  // otherwise, since the board's own pixel container already stops short of the inset in that case
+  // and there's nothing left for a pickup to need to avoid. Frozen at mount same as width/height
+  // above, and fed straight through to useGameState so a pickup never spawns somewhere a notch/
+  // Dynamic Island/home-indicator/speaker cutout would physically hide it (see gameEngine.ts's
+  // buildUnsafeAreaCells).
+  safeAreaInsetsPx: { top: number; right: number; bottom: number; left: number }
   settings: GameSettings
   colors: Record<Player, string>
   // Seat -> saved profile name, only for seats that had one selected at lobby handoff — see
@@ -87,12 +100,13 @@ interface GameRoundProps {
 // GameScreen's own freeze of the values it passes down, but cheap insurance against this
 // component ever receiving something other than a stable value), so a later rotation never tears
 // the round down, rebuilds the grid, or touches the board/touch layer at all.
-function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, liveHeight, settings, colors, profileNames, profileTags, profileUnlockToast, orientationMode: orientationModeAtMount, p1OnRight: p1OnRightAtMount, roundHistory, onRoundOutcome }: GameRoundProps) {
+function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, liveHeight, safeAreaInsetsPx: safeAreaInsetsPxAtMount, settings, colors, profileNames, profileTags, profileUnlockToast, orientationMode: orientationModeAtMount, p1OnRight: p1OnRightAtMount, roundHistory, onRoundOutcome }: GameRoundProps) {
   const [width] = useState(widthAtMount)
   const [height] = useState(heightAtMount)
+  const [safeAreaInsetsPx] = useState(safeAreaInsetsPxAtMount)
   const [orientationMode] = useState(orientationModeAtMount)
   const [p1OnRight] = useState(p1OnRightAtMount)
-  const { state, turn, activate, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode, p1OnRight)
+  const { state, turn, activate, beginPlaying, rematch, tickIntervalMs, cellPx } = useGameState(width, height, settings, colors, orientationMode, p1OnRight, safeAreaInsetsPx)
 
   // Live, not frozen (see liveWidth/liveHeight's own doc on GameRoundProps) — recomputed every
   // render as the window resizes/gutter changes, so the board+touch subtree below visibly tracks
@@ -323,7 +337,21 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
   // while flat, which is exactly the layout getFixedZoneRotation is for (see its own doc): a genuine
   // landscape hold still rotates everything, but a portrait "upside down" reading is ignored rather
   // than adding a spurious 180° flip on top of P2's own fixed one below (getOpposingZoneRotation).
+  // Only ever fed to content that's genuinely split into two fixed physical zones (the two-player
+  // branch of OnboardingOverlay/RoundOverDialog, and the shared-neutral-zone chips below) — anything
+  // with just ONE seat to address has no zone to protect from a spurious 180° flip, and wants
+  // singleSeatRotation below instead.
   const rotation = getFixedZoneRotation(liveOrientation.orientationMode, liveOrientation.p1OnRight, liveOrientation.upsideDown)
+  // A second, independent orientation subscription (not derived from liveOrientation above) because
+  // it needs its OWN lock behavior: userSettings.lockOrientation should freeze single-seat overlay
+  // content (a centered dialog, or a corner button with no second seat to stay neutral for) in
+  // place, exactly like index.tsx's own FakeLandscapeView/useRotation pair already does for the
+  // title screen — but must never freeze the board's own fixed-zone content above, which has no
+  // "lock" concept of its own and always tracks the live landscape/portrait split it's actually
+  // being touched in. getViewRotation, not getFixedZoneRotation: this is for content with no fixed
+  // zone to protect, so the portrait "upside down" reading should reposition it too, not be ignored.
+  const singleSeatOrientation = useOrientationState(userSettings.lockOrientation)
+  const singleSeatRotation = getViewRotation(singleSeatOrientation.orientationMode, singleSeatOrientation.p1OnRight, singleSeatOrientation.upsideDown)
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
@@ -333,6 +361,13 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
   const chipBg = dark ? '#000000' : '#FFFFFF'
   const chipFg = dark ? '#FFFFFF' : '#000000'
   const chipRotation = rotation % 360 !== 0 ? { transform: [{ rotate: `${rotation}deg` }] } : undefined
+  // Only meaningful in the useCornerLayout branch below — rotateInsets remaps the device's own
+  // (physical-frame) safe-area insets onto whichever edge is actually visual-top/left/right once the
+  // corner chips below are rotated+repositioned by singleSeatRotation, same as index.tsx's own
+  // identical rotatedInsets. Unused (and harmless to compute) in the shared-neutral branch, which
+  // still measures leftSlot/rightSlot from the device's raw physical edges as it always has.
+  const insets = useSafeAreaInsets()
+  const cornerInsets = rotateInsets(insets, singleSeatRotation)
 
   // The inverse of @tastic/split-screen's needsSharedNeutralZone — see its own doc for the full
   // reasoning (and why it deliberately isn't keyed on Platform.OS). CornerActionButtons-style fixed
@@ -348,14 +383,19 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       OnboardingOverlay's countdown timers are scheduled once on mount with no pause hook of their
       own, so unmounting is what stops them ticking underneath either dialog, and remounting on
       close is what restarts the count from '3' instead of resuming mid-count with stale timers. */}
-      {phase === 'onboarding' && !settingsOpen && !confirmBackVisible && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={rotation} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={onOnboardingComplete} />}
+      {/* Both dialogs below branch internally on humanPlayers.length (see each one's own doc): the
+      single-card branch (vsCpu) has no second seat to protect, so it gets singleSeatRotation same as
+      MatchOverDialog/SettingsDialog below; the two-player, per-seat-split branch keeps the board's
+      own fixed-zone `rotation` exactly as before. */}
+      {phase === 'onboarding' && !settingsOpen && !confirmBackVisible && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={humanPlayers.length === 1 ? singleSeatRotation : rotation} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={onOnboardingComplete} />}
 
-      {phase === 'roundOver' && showResultDialog && !matchOver && outcome && <RoundOverDialog orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={rotation} humanPlayers={humanPlayers} gameMode={gameMode} outcome={outcome} colors={colors} profileUnlocked={profileUnlockToast} rematchReady={rematchReady} onRequestRematch={onRequestRematch} onQuit={onQuit} />}
+      {phase === 'roundOver' && showResultDialog && !matchOver && outcome && <RoundOverDialog orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={humanPlayers.length === 1 ? singleSeatRotation : rotation} humanPlayers={humanPlayers} gameMode={gameMode} outcome={outcome} colors={colors} profileUnlocked={profileUnlockToast} rematchReady={rematchReady} onRequestRematch={onRequestRematch} onQuit={onQuit} />}
 
       {/* Terminal — either player quitting from the dialog above ends the match outright, so this
       replaces it rather than layering on top, and tallies every round played this streak (see
-      roundHistory) rather than just the one that just finished. */}
-      {matchOver && <MatchOverDialog roundHistory={roundHistory} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlocked={profileUnlockToast} gameMode={gameMode} onExit={onExit} rotation={rotation} />}
+      roundHistory) rather than just the one that just finished. Always ONE centered card regardless
+      of humanPlayers.length (see this dialog's own doc), so it always wants singleSeatRotation. */}
+      {matchOver && <MatchOverDialog roundHistory={roundHistory} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlocked={profileUnlockToast} gameMode={gameMode} onExit={onExit} rotation={singleSeatRotation} />}
 
       {/* Same overlay+card shell as the round-over dialog above (right down to the shared
       styles.overlay/overlayCard/overlayButton) so a mid-onboarding confirmation reads as the same
@@ -367,7 +407,7 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       Rematch's slot above) keeps primary, Quit takes secondary. */}
       {confirmBackVisible && (
         <View style={styles.overlay}>
-          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>
+          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, singleSeatRotation % 360 !== 0 && { transform: [{ rotate: `${singleSeatRotation}deg` }] }]}>
             <Icon source='alert-circle-outline' size={64} color={themeColors.secondary} />
             <Text variant='headlineLarge' style={[styles.overlayTitle, { color: themeColors.secondary }]}>
               Quit Match?
@@ -385,24 +425,41 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
 
       {/* Back (onboarding only) + Settings chip buttons — moved here from GameRound for the
       identical reason as every other floating overlay in this component: they need the live
-      `rotation` signal above, and computing that from a hook called directly in GameRound (rather
+      orientation signal above, and computing that from a hook called directly in GameRound (rather
       than this, its sibling) would cascade a re-render into the board/touch subtree on every tilt.
       Square glyphs in square chips, so rotating the whole button (not just its icon) never distorts
       a hit box the way a non-square zone would — see this component's own doc on why dialogs rotate
-      only their inner content instead. Positioned per useCornerLayout above — see its own doc for
-      which modes want the fixed top corners vs. the shared vertical midline. */}
-      {(phase === 'onboarding' || (phase === 'roundOver' && showResultDialog && !matchOver)) && (
-        <>
-          <View style={useCornerLayout ? styles.cornerLeftSlot : styles.leftSlot}>
-            <IconButton icon='arrow-left' iconColor={chipFg} containerColor={chipBg} style={[styles.chipButton, chipRotation]} size={22} onPress={onBackPress} accessibilityLabel='Back' />
-          </View>
-          <View style={useCornerLayout ? styles.cornerRightSlot : styles.rightSlot}>
-            <IconButton icon='cog' iconColor={chipFg} containerColor={chipBg} style={[styles.chipButton, chipRotation]} size={22} onPress={onSettingsOpen} accessibilityLabel='Settings' />
-          </View>
-        </>
-      )}
+      only their inner content instead.
+      useCornerLayout: no second seat's zone to stay neutral for (vsCpu, or 2P side-by-side, which
+      already gives each seat its own dedicated half — see needsSharedNeutralZone's own doc), so the
+      whole chip pair is wrapped in FakeLandscapeView and actually MOVES to wherever "top" visually
+      is right now (including a portrait upside-down hold, which chipRotation's fixed-zone rotation
+      deliberately ignores), the same top-left/top-right corners index.tsx's own trophy/settings
+      buttons use — rather than just spinning in place while staying glued to the device's fixed
+      physical top edge. !useCornerLayout (2P face-to-face): unchanged — leftSlot/rightSlot on the
+      shared vertical midline, glyph-only chipRotation, exactly as before. */}
+      {(phase === 'onboarding' || (phase === 'roundOver' && showResultDialog && !matchOver)) &&
+        (useCornerLayout ? (
+          <FakeLandscapeView locked={userSettings.lockOrientation} style={[StyleSheet.absoluteFill, styles.cornerChipsWrap]}>
+            <View style={[styles.cornerLeftSlot, { top: 8 + cornerInsets.top, left: 8 + cornerInsets.left }]}>
+              <IconButton icon='arrow-left' iconColor={chipFg} containerColor={chipBg} style={styles.chipButton} size={22} onPress={onBackPress} accessibilityLabel='Back' />
+            </View>
+            <View style={[styles.cornerRightSlot, { top: 8 + cornerInsets.top, right: 8 + cornerInsets.right }]}>
+              <IconButton icon='cog' iconColor={chipFg} containerColor={chipBg} style={styles.chipButton} size={22} onPress={onSettingsOpen} accessibilityLabel='Settings' />
+            </View>
+          </FakeLandscapeView>
+        ) : (
+          <>
+            <View style={styles.leftSlot}>
+              <IconButton icon='arrow-left' iconColor={chipFg} containerColor={chipBg} style={[styles.chipButton, chipRotation]} size={22} onPress={onBackPress} accessibilityLabel='Back' />
+            </View>
+            <View style={styles.rightSlot}>
+              <IconButton icon='cog' iconColor={chipFg} containerColor={chipBg} style={[styles.chipButton, chipRotation]} size={22} onPress={onSettingsOpen} accessibilityLabel='Settings' />
+            </View>
+          </>
+        ))}
 
-      <SettingsDialog visible={settingsOpen} onDismiss={onSettingsDismiss} settings={userSettings} setSettings={setUserSettings} rotation={rotation} />
+      <SettingsDialog visible={settingsOpen} onDismiss={onSettingsDismiss} settings={userSettings} setSettings={setUserSettings} rotation={singleSeatRotation} />
     </>
   )
 }
@@ -582,6 +639,10 @@ export default function GameScreen() {
   // once.
   const liveWidth = settings.extendIntoSafeArea ? windowWidth : windowWidth - insets.left - insets.right - 2 * gutterWidth
   const liveHeight = settings.extendIntoSafeArea ? windowHeight : windowHeight - insets.top - insets.bottom
+  // All-zero unless the board is actually bleeding under the real insets (extendIntoSafeArea) — see
+  // GameRoundProps' own safeAreaInsetsPx comment for why: the non-full-bleed boardArea style below
+  // already stops short of the inset on its own, so there's nothing left for a pickup to avoid.
+  const safeAreaInsetsPx = settings.extendIntoSafeArea ? insets : ZERO_INSETS
 
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
@@ -592,7 +653,7 @@ export default function GameScreen() {
       bar has nothing to clash with, so there's nothing to add on top of the rotation-driven default. */}
       {settings.extendIntoSafeArea && <StatusBar hidden />}
       <View style={[styles.boardArea, settings.extendIntoSafeArea ? styles.boardAreaFullBleed : { top: insets.top, bottom: insets.bottom, left: insets.left + gutterWidth, right: insets.right + gutterWidth }]} onLayout={onBoardLayout}>
-        {designSize && <GameRound width={designSize.width} height={designSize.height} liveWidth={liveWidth} liveHeight={liveHeight} settings={settings} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />}
+        {designSize && <GameRound width={designSize.width} height={designSize.height} liveWidth={liveWidth} liveHeight={liveHeight} safeAreaInsetsPx={safeAreaInsetsPx} settings={settings} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />}
       </View>
     </View>
   )
@@ -609,11 +670,18 @@ const styles = StyleSheet.create({
   // same reasoning as BoxHockey's identical chipButton style — otherwise a visible gap opens up
   // between the solid chip and its slot now that there's a background to see the edge of.
   chipButton: { margin: 0 },
-  // The useCornerLayout counterpart to leftSlot/rightSlot below — a fixed distance from the top
-  // instead of centered on the board's vertical midline, for whichever modes don't need a neutral
-  // shared position (see useCornerLayout's own doc for which).
-  cornerLeftSlot: { left: 4, position: 'absolute', top: 8 },
-  cornerRightSlot: { position: 'absolute', right: 4, top: 8 },
+  // The useCornerLayout counterpart to leftSlot/rightSlot below — pinned near the top-left/top-right
+  // corner instead of centered on the board's vertical midline, for whichever modes don't need a
+  // neutral shared position (see useCornerLayout's own doc for which). No fixed top/left/right of
+  // its own (unlike leftSlot/rightSlot below) — both are rendered inside a FakeLandscapeView that
+  // supplies rotation-aware insets inline, so they actually move to the correct physical corner
+  // under a live tilt instead of just spinning a glyph in place at a fixed physical offset.
+  // box-none: this full-bleed wrapper only exists to give FakeLandscapeView something to rotate —
+  // it must never itself swallow the board's own touches in the (mostly empty) space between the
+  // two corner slots below.
+  cornerChipsWrap: { pointerEvents: 'box-none' },
+  cornerLeftSlot: { position: 'absolute' },
+  cornerRightSlot: { position: 'absolute' },
   // top: 0 + bottom: 0 + justifyContent: 'center' centers the button on the board's vertical
   // midline regardless of its height, instead of pinning it a fixed distance from the top the way
   // cornerLeftSlot/cornerRightSlot above do for the other layout mode. A bare View here doesn't
