@@ -1,13 +1,13 @@
 import { getBlendedColor, useAutoPaperTheme } from '@rific/auto-paper'
-import { Button, IconButton, useVibration } from '@rific/feedback-press'
+import { IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { computeContentBounds, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
+import { ConfirmDialog } from '@tastic/hud'
 import { FakeLandscapeView, needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, useWindowDimensions, View } from 'react-native'
-import { Icon, Text } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import GameBoardHost from '@/components/GameBoardHost'
@@ -352,12 +352,10 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
   // zone to protect, so the portrait "upside down" reading should reposition it too, not be ignored.
   const singleSeatOrientation = useOrientationState(userSettings.lockOrientation)
   const singleSeatRotation = getViewRotation(singleSeatOrientation.orientationMode, singleSeatOrientation.p1OnRight, singleSeatOrientation.upsideDown)
-  const { colors: themeColors, dark } = useAutoPaperTheme()
-  const cardBg = dark ? '#111111' : '#F2F2F2'
-  const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
+  const { dark } = useAutoPaperTheme()
   // Same chip colors as GameRound's own board-level fg/bg — duplicated here rather than passed as
-  // props since this component already computes dark/themeColors for the cards above, and these
-  // chips need the identical rotation-in-place treatment as everything else in this component.
+  // props since this component already computes `dark` for the chips below, and these chips need
+  // the identical rotation-in-place treatment as everything else in this component.
   const chipBg = dark ? '#000000' : '#FFFFFF'
   const chipFg = dark ? '#FFFFFF' : '#000000'
   const chipRotation = rotation % 360 !== 0 ? { transform: [{ rotate: `${rotation}deg` }] } : undefined
@@ -397,31 +395,13 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       of humanPlayers.length (see this dialog's own doc), so it always wants singleSeatRotation. */}
       {matchOver && <MatchOverDialog roundHistory={roundHistory} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlocked={profileUnlockToast} gameMode={gameMode} onExit={onExit} rotation={singleSeatRotation} />}
 
-      {/* Same overlay+card shell as the round-over dialog above (right down to the shared
-      styles.overlay/overlayCard/overlayButton) so a mid-onboarding confirmation reads as the same
-      kind of dialog, not a one-off. The pip row (same component OnboardingOverlay itself uses)
-      shows exactly what's at stake instead of a sentence restating the round count. Cancel/Quit
-      reuse the app's own primary/secondary pairing (same two colors as index.tsx's One
-      Player/Two Player) rather than the theme's MD3 error role, which read as washed-out pastel
-      against this app's normal saturated palette — Cancel (the "stay" option, mirroring
-      Rematch's slot above) keeps primary, Quit takes secondary. */}
-      {confirmBackVisible && (
-        <View style={styles.overlay}>
-          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, singleSeatRotation % 360 !== 0 && { transform: [{ rotate: `${singleSeatRotation}deg` }] }]}>
-            <Icon source='alert-circle-outline' size={64} color={themeColors.secondary} />
-            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: themeColors.secondary }]}>
-              Quit Match?
-            </Text>
-            <RoundHistoryPips roundHistory={roundHistory} p1Color={colors[1]} p2Color={colors[2]} />
-            <Button mode='contained' onPress={onCancelConfirmBack} style={styles.overlayButton} buttonColor={themeColors.primary} textColor={themeColors.onPrimary}>
-              Cancel
-            </Button>
-            <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={themeColors.secondary} textColor={themeColors.onSecondary}>
-              Quit
-            </Button>
-          </View>
-        </View>
-      )}
+      {/* Shared @tastic/hud ConfirmDialog (fleet convergence) in place of this app's own
+      hand-rolled overlay+card shell — trades this dialog's previous secondary-accent Quit button
+      and MONO_FONT styling for the shared component's primary accent and default font, an
+      approved, deliberate trade-off. The pip row (same component OnboardingOverlay itself uses) is
+      kept as the dialog's message content, showing exactly what's at stake instead of a sentence
+      restating the round count. */}
+      <ConfirmDialog visible={confirmBackVisible} title='Quit Match?' message={<RoundHistoryPips roundHistory={roundHistory} p1Color={colors[1]} p2Color={colors[2]} />} confirmLabel='Quit' cancelLabel='Cancel' icon='alert-circle-outline' destructive={false} onConfirm={safeBack} onCancel={onCancelConfirmBack} rotation={singleSeatRotation} />
 
       {/* Back (onboarding only) + Settings chip buttons — moved here from GameRound for the
       identical reason as every other floating overlay in this component: they need the live
@@ -688,29 +668,6 @@ const styles = StyleSheet.create({
   // claim any touch of its own, so it can span the full board height without stealing swipes from
   // TouchInputLayer underneath — only the IconButton it wraps is actually touchable.
   leftSlot: { bottom: 0, justifyContent: 'center', left: 4, position: 'absolute', top: 0 },
-  overlay: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    bottom: 0,
-    justifyContent: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0
-  },
-  overlayButton: { width: 160 },
-  overlayCard: {
-    alignItems: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 16,
-    maxWidth: 360,
-    padding: 32
-  },
-  // headlineLarge's own line-height leaves slack under the glyphs that the flex `gap` above stacks
-  // on top of, reading as extra room below the title specifically (most visible once the pip row
-  // sits right after it, next to a button with no such slack) — this claws it back.
-  overlayTitle: { fontWeight: 'bold', marginBottom: -8 },
   rightSlot: { bottom: 0, justifyContent: 'center', position: 'absolute', right: 4, top: 0 },
   root: { flex: 1 }
 })

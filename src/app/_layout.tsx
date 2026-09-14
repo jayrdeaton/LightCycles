@@ -1,6 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Toaster, ToastProvider } from '@rific/toaster'
 import { getViewRotation, OrientationProvider, useOrientationState } from '@tastic/core'
+import { UpdateDialog } from '@tastic/hud'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
 import { DeviceMotion } from 'expo-sensors'
@@ -12,10 +13,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-import { Feedback } from '@/components/Feedback'
 import { Fonts } from '@/components/Fonts'
+import { Providers } from '@/components/Providers'
 import { Theme } from '@/components/Theme'
-import { UpdateDialog } from '@/components/UpdateDialog'
 import { GameSettingsProvider } from '@/hooks/useGameSettings'
 import { GameStatsProvider } from '@/hooks/useGameStats'
 import { ProfilesProvider } from '@/hooks/useProfiles'
@@ -75,7 +75,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.flext}>
       <SafeAreaProvider>
         <Fonts>
-          <Feedback>
+          <Providers>
             <Theme>
               <GameSettingsProvider>
                 <GameStatsProvider>
@@ -110,7 +110,7 @@ export default function RootLayout() {
                 </GameStatsProvider>
               </GameSettingsProvider>
             </Theme>
-          </Feedback>
+          </Providers>
         </Fonts>
       </SafeAreaProvider>
     </GestureHandlerRootView>
