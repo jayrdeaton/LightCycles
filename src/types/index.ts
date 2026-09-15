@@ -136,7 +136,7 @@ export interface GameSettings {
   // Web-only in practice (see TouchInputLayer.web.tsx) — native ignores it — but kept on the
   // shared settings shape rather than platform-split, same as every other field here.
   keyScheme: Record<Player, KeyScheme>
-  // Opt-in — see useAccelerometerOrientation's `locked` param. Off by default: the app-wide
+  // Opt-in — see useOrientationState's `locked` param. Off by default: the app-wide
   // orientationMode just follows however the phone is actually being held, rather than being a
   // stored preference itself.
   lockOrientation: boolean

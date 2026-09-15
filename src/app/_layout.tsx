@@ -51,7 +51,7 @@ function AppStack() {
   )
 }
 
-// A sibling of AppStack, not a wrapper around it — calling useAccelerometerOrientation() here
+// A sibling of AppStack, not a wrapper around it — calling useOrientationState() here
 // rather than in RootLayout itself is what keeps every live tilt update from re-rendering the whole
 // app tree (AppStack included) on every commit, the same isolation MatchOverlays uses in game.tsx
 // for the identical reason.

@@ -7,6 +7,7 @@ import { Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withTi
 
 import { deathAnimationDurationMs, MIN_TRAIL_LENGTH_BEFORE_TRIM, POWERUP_EFFECT_COLORS, POWERUP_PULSE_DURATION_MS, POWERUP_PULSE_SCALE, POWERUP_SPAWN_FADE_MS, powerupPickupRadiusPx, TRAIL_SEVER_EAT_MAX_MS, TRAIL_SEVER_EAT_MIN_MS, TRAIL_SEVER_EAT_MS_PER_CELL } from '@/constants/game'
 import { GamePhase, GridCell, GridSize, OrientationMode, Player, PlayerState, Portal, PowerupPickup, Tunnel } from '@/types'
+import { shouldTrimTrailAt } from '@/utils/gameEngine'
 import { zoneSideFor } from '@/utils/playerZones'
 
 export interface GameBoardProps {
@@ -16,7 +17,7 @@ export interface GameBoardProps {
   cellPx: number
   grid: GridSize
   orientationMode: OrientationMode
-  // Only meaningful when orientationMode === 'sideBySide' — see useAccelerometerOrientation and
+  // Only meaningful when orientationMode === 'sideBySide' — see useOrientationState and
   // TouchInputLayer.tsx's identical prop.
   p1OnRight: boolean
   // Ticks elapsed this round — see GameState's own comment. Drives PlayerTrail's head-glide
@@ -239,22 +240,36 @@ function Walls({ grid, cellPx, orientationMode, p1OnRight, players, phase, wrapE
 }
 
 // How far the tail should have visually crept from trail[0] toward trail[1] as of `tick`, as a
-// fraction in [0, 1) — the *continuous* counterpart to gameEngine.ts's shouldTrimTrailAt, which
-// only tracks the discrete "has a whole cell been trimmed yet" boundary. Trimming one whole cell
-// exactly when this fraction wraps from just-under-1 back to 0 is what keeps this consistent with
-// the actual (discrete) trail data: shouldTrimTrailAt's own condition is precisely "did this
-// fraction's floor change this tick," so the two can never disagree about when a trim happens —
-// this just fills in what the trim looks like *between* ticks instead of holding still until it
-// does. Without it, every tick that doesn't land on a whole trim left the tail dead still, then
-// jumped a full cell on the tick that did — a held-then-hop cadence, not a following one.
-// `trailLength` mirrors gameEngine.ts's own MIN_TRAIL_LENGTH_BEFORE_TRIM gate on the trim itself —
-// without it this would compute a nonzero creep purely from elapsed ticks even during the grace
-// period where the trail isn't actually being trimmed yet, visually detaching the tail from
-// trail[0] before any cell has really been removed.
+// fraction in [0, 1] — reaching exactly 1 on the last tick before gameEngine.ts's own
+// shouldTrimTrailAt actually fires the next trim, whatever tick that turns out to be, rather than
+// assuming every trim cycle is the same length. `growthRate` isn't a clean "N ticks per trim"
+// rate (see TRAIL_SPEED_RATE) — shouldTrimTrailAt's own comment notes it holds the average
+// exactly, which it does by spacing individual trims unevenly (e.g. 'fast' fires three trims back
+// to back, then skips a tick) — so a formula that assumed a fixed-length cycle (the previous
+// version here just took the fractional part of `tick * (1 - growthRate)`) fell short of 1 by a
+// wide margin on the short end of that unevenness: 'fast' could leave a whole 0.75 of a cell
+// un-crept the instant a trim landed, since tailEdgeEnd (nextCenter, below) jumps to the fresh
+// exact cell the moment the real trim happens regardless of how far this got. The visible result
+// was the very tail tip appearing to hang a noticeable fraction of a cell *behind* trail[0]'s own
+// current position right after every trim (most of a cell on 'fast'), snapping forward to catch
+// up, then falling behind again next trim — reading as the tip being slightly detached from the
+// rest of the trail rather than a clean continuation of it. Walking the *actual* schedule instead
+// (both directions, via the exact same shouldTrimTrailAt the engine trims with, so this can never
+// silently drift out of sync with it) fixes that: whatever tick the current cell became the tail
+// (`segmentStart`, itself if this tick just trimmed) and whatever tick it next will
+// (`nextTrimTick`), progress is this tick's position within *that* span — 1 on the tick right
+// before nextTrimTick, however long or short the span actually is. `trailLength` mirrors
+// gameEngine.ts's own MIN_TRAIL_LENGTH_BEFORE_TRIM gate on the trim itself — without it this
+// would compute a nonzero creep purely from elapsed ticks even during the grace period where the
+// trail isn't actually being trimmed yet, visually detaching the tail from trail[0] before any
+// cell has really been removed.
 function tailProgress(tick: number, growthRate: number, trailLength: number): number {
   if (growthRate >= 1 || trailLength <= MIN_TRAIL_LENGTH_BEFORE_TRIM) return 0
-  const fractionalTrims = tick * (1 - growthRate)
-  return fractionalTrims - Math.floor(fractionalTrims)
+  let nextTrimTick = tick + 1
+  while (!shouldTrimTrailAt(nextTrimTick, growthRate)) nextTrimTick++
+  let segmentStart = tick
+  while (segmentStart > 0 && !shouldTrimTrailAt(segmentStart, growthRate)) segmentStart--
+  return (tick - segmentStart + 1) / (nextTrimTick - segmentStart)
 }
 
 function trailPath(trail: PlayerState['trail'], cellPx: number) {

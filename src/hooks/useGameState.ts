@@ -6,7 +6,7 @@ import { applyCpuActivation, applyCpuTurn } from '@/utils/cpuAi'
 import { applyActivation, applyTurnIntent, buildOccupiedSet, buildTunnelCellSet, computeTickIntervalMs, createInitialGameState, startPlaying, tickGame } from '@/utils/gameEngine'
 
 // orientationMode/p1OnRight are passed separately rather than read off `settings` — they're
-// derived live from the device's own physical tilt (see useAccelerometerOrientation), not a stored
+// derived live from the device's own physical tilt (see useOrientationState), not a stored
 // setting. safeAreaInsetsPx defaults to all-zero — see GameRound's own comment on GameRoundProps
 // for why the caller is what decides whether it's actually the device's real insets or zeroed out.
 export function useGameState(width: number, height: number, settings: GameSettings, colors: Record<Player, string>, orientationMode: OrientationMode, p1OnRight: boolean, safeAreaInsetsPx: { top: number; right: number; bottom: number; left: number } = { top: 0, right: 0, bottom: 0, left: 0 }) {

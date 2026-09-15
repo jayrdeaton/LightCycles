@@ -7,7 +7,7 @@ import { Direction, GridCell, GridSize, OrientationMode, Player } from '@/types'
 // owner, so in face-to-face they get the "near" bottom zone (the natural portrait orientation
 // faces them) while player 2 is the "far" player (top zone, needs the input flip — see
 // utils/turnIntent.ts). In side-by-side, `p1OnRight` decides which zone is player 1's — see
-// useAccelerometerOrientation — so a player's actual starting cycle always lands in the same zone
+// useOrientationState — so a player's actual starting cycle always lands in the same zone
 // GameBoard.tsx's wallPath and TouchInputLayer.tsx's hit zone are drawn for, rather than a side
 // that's fixed regardless of which way the device was rotated.
 //

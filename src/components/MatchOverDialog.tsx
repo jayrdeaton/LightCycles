@@ -122,7 +122,7 @@ export default function MatchOverDialog({ roundHistory, colors, profileNames = {
           </View>
         )}
         <Button mode='contained' onPress={onExit} style={styles.overlayButton} buttonColor={themeColors.primary} textColor={themeColors.onPrimary}>
-          Menu
+          Loadout
         </Button>
       </View>
     </View>

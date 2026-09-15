@@ -128,7 +128,7 @@ export function deathAnimationDurationMs(trailLength: number): { explosionMs: nu
 }
 
 // Lobby player-panel area (see lobby.tsx): whenever a committed tilt reading changes orientationMode
-// or which physical side P1 lands on (see useAccelerometerOrientation), the panels fade out, the
+// or which physical side P1 lands on (see useOrientationState), the panels fade out, the
 // layout underneath swaps while invisible, then they fade back in — masking what would otherwise be
 // an instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is
 // masking a reflow that already happened, not a deliberate reveal like onboarding's.

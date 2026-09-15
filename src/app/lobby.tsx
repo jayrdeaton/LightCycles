@@ -1,7 +1,7 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
-import { getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
+import { FakeLandscapeView, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
 import { CornerActionButtons, MenuOption, PressAwayOverlay, ReadyButton, SharedActionBand, usePopoverHost } from '@tastic/hud'
-import { DualZoneLayout, FakeLandscapeView, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
+import { DualZoneLayout, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -518,7 +518,7 @@ export default function LobbyScreen() {
             also shares this host, and elevating this row for *its* popovers too would tie the two,
             letting DOM order wrongly decide which one paints on top (see LobbyPlayerPanel and
             LobbySharedControls' matching ownPopoverOpen checks). */}
-            <Animated.View style={[styles.playersRow, isSideBySide && styles.playersRowSpaced, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen, panelFadeStyle]}>
+            <Animated.View style={[styles.playersRow, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen, panelFadeStyle]}>
               {isSideBySide && panelLayout.p1OnRight ? p2Panel : p1Panel}
               {isSideBySide && panelLayout.p1OnRight ? p1Panel : p2Panel}
             </Animated.View>
@@ -557,23 +557,17 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  // Matches `rotatable`'s own gap (32) — real breathing room between the two panels rather than
-  // LobbyPlayerPanel's own tight pickerRow gap (12), which read the human and CPU panels as one
-  // evenly spaced row of triggers instead of two distinct player slots. Portrait-only — see
-  // playersRowSpaced below for why landscape needs a much wider gap instead.
+  // Matches LobbyPlayerPanel's own pickerRow gap (12), not a wider "these are two separate
+  // panels" gap — matches BoxHockey/AirHockey/Pong/Snake's identical playersRow: the human and
+  // CPU panels read as one evenly spaced row of triggers this way, rather than two
+  // independently-centered blocks whose different widths throw off screen-edge symmetry. Applies
+  // in both portrait and landscape/side-by-side — no separate wider gap for landscape.
   playersRow: {
     flexDirection: 'row',
-    gap: 32
+    gap: 12
   },
   playersRowOpen: {
     zIndex: 100
-  },
-  // Side-by-side only applies once the phone is actually held in landscape, which is genuinely
-  // wide, so the two zones get real breathing room between them instead of playersRow's own
-  // tight, portrait-tuned gap. Wide enough that each player's popovers (color swatch grid,
-  // control-scheme dropdown) stay clear of the other's reach even when both are open at once.
-  playersRowSpaced: {
-    gap: 180
   },
   // Owns the flex-centering layout `container` used to apply directly — now one level deeper,
   // since everything visible sits inside FakeLandscapeView, which needs a real (not shrink-wrapped)

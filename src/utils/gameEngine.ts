@@ -149,8 +149,11 @@ export function applyTurnIntent(state: GameState, player: Player, direction: Dir
 // growth at `growthRate` cells/tick (1 = never trims, i.e. the original behavior). Compares how
 // many trims *should* have happened by this tick vs. by the last one, rather than a fixed
 // "every Nth tick" cadence, so any rate between 0 and 1 is honored exactly on average — not just
-// simple fractions like 1/2 or 1/3.
-function shouldTrimTrailAt(tick: number, growthRate: number): boolean {
+// simple fractions like 1/2 or 1/3. Exported so GameBoard.tsx's own tailProgress can look up the
+// real previous/next trim tick from this exact schedule instead of a separately-derived formula
+// that could drift out of sync with it — see tailProgress's own comment for why that drift used
+// to be a real, visible bug.
+export function shouldTrimTrailAt(tick: number, growthRate: number): boolean {
   if (growthRate >= 1) return false
   const trimsDueBefore = Math.floor((tick - 1) * (1 - growthRate))
   const trimsDueNow = Math.floor(tick * (1 - growthRate))

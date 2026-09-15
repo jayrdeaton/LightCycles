@@ -12,7 +12,7 @@ export type ZoneSide = 'top' | 'bottom' | 'left' | 'right'
 // Face-to-face: player 1 is assumed to be the device's owner, so they always get the near/bottom
 // zone; player 2 gets the far/top zone, regardless of p1OnRight (meaningless on this axis).
 // Side-by-side (and web's shared layout): whichever player p1OnRight says is currently on the
-// right gets the right zone — see useAccelerometerOrientation for which physical rotation
+// right gets the right zone — see useOrientationState for which physical rotation
 // direction puts P1 there.
 export function zoneSideFor(player: Player, orientationMode: OrientationMode, p1OnRight: boolean): ZoneSide {
   if (orientationMode === 'faceToFace') return player === 2 ? 'top' : 'bottom'

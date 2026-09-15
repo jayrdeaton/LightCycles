@@ -1,9 +1,9 @@
 import { getBlendedColor, useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
-import { computeContentBounds, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
+import { computeContentBounds, FakeLandscapeView, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
 import { ConfirmDialog } from '@tastic/hud'
-import { FakeLandscapeView, needsSharedNeutralZone } from '@tastic/split-screen'
+import { needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -131,7 +131,7 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
   // The persisted, cross-round defaults (not this round's already-locked-in `settings` prop above)
   // — matches every other screen's settings button, which always edits "next time," never the
   // round already underway.
-  const { settings: userSettings, setSettings: setUserSettings } = useGameSettings()
+  const { settings: userSettings, setSettings: setUserSettings, setIsActivelyPlaying } = useGameSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Only asked once there's an actual score to lose (the pip row itself uses the same gate, see
   // OnboardingOverlay) — the very first round's back button still exits immediately, since there's
@@ -221,6 +221,21 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
   const handleQuit = useCallback(() => setMatchOver(true), [])
   const handleRequestRematch = useCallback((player: Player) => setRematchReady((ready) => ({ ...ready, [player]: true })), [])
 
+  // Same condition MatchOverlays' own back/settings chips gate on (passed down as its own
+  // controlsVisible prop, below).
+  const controlsVisible = state.phase === 'onboarding' || (state.phase === 'roundOver' && showResultDialog) || matchOver
+
+  // Mirrors state.phase === 'playing' up to useGameSettings.tsx's own useEdgeGestureGuard call
+  // rather than calling that hook directly here: it stays mounted once at the provider (same as
+  // every other cross-cutting settings concern in this app), and this is just the one signal it
+  // has no other way to read. Reset to false on unmount too, so leaving this screen mid-round by
+  // any path (not just the in-app back button) can't leave Edge Guard stuck on — GameRound only
+  // mounts for the life of one match, matching this effect's own scope exactly.
+  useEffect(() => {
+    setIsActivelyPlaying(state.phase === 'playing')
+    return () => setIsActivelyPlaying(false)
+  }, [state.phase, setIsActivelyPlaying])
+
   // Fires the actual rematch once every human in this round has pressed Rematch — for vsCpu that's
   // just player 1 (see humanPlayers), so pressing it rematches immediately, matching the CPU always
   // "agreeing" instantly. Guarded on !matchOver so a Quit that lands the same tick a rematch was
@@ -271,7 +286,7 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
       signal, and a hook call here (GameRound itself) would cascade a re-render into the board/
       touch subtree above on every tilt. See MatchOverlays' own doc for the full reasoning; the
       slot positioning/styling comments that used to live here now live there alongside the JSX. */}
-      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmBackVisible={confirmBackVisible} onCancelConfirmBack={() => setConfirmBackVisible(false)} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={() => router.dismissAll()} onBackPress={onBackPress} />
+      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmBackVisible={confirmBackVisible} onCancelConfirmBack={() => setConfirmBackVisible(false)} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} controlsVisible={controlsVisible} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={safeBack} onBackPress={onBackPress} />
     </>
   )
 }
@@ -301,6 +316,10 @@ interface MatchOverlaysProps {
   onOnboardingComplete: () => void
   showResultDialog: boolean
   matchOver: boolean
+  // Same boolean GameRound derives for its own useEdgeGestureGuard call — passed down instead of
+  // recomputing the identical phase/showResultDialog/matchOver expression a second time here, so
+  // the two can never drift out of sync with each other.
+  controlsVisible: boolean
   outcome: RoundOutcome | null
   gameMode: GameMode
   rematchReady: Record<Player, boolean>
@@ -315,7 +334,7 @@ interface MatchOverlaysProps {
 
 // Every floating in-match dialog, as GameRound's own sibling rather than something it renders
 // inline — see GameRound's own comment on why: this is the one piece that needs LIVE rotation
-// tracking (nothing else in a match does), and calling useAccelerometerOrientation() from a
+// tracking (nothing else in a match does), and calling useOrientationState() from a
 // genuinely separate component is what actually keeps that live tracking from cascading a
 // re-render into the board/touch subtree next to it. A parent re-rendering always re-renders its
 // own children too, board included, regardless of whether the board's own props actually changed —
@@ -330,7 +349,7 @@ interface MatchOverlaysProps {
 // whole overlay distorted a full-width/half-height zone into a narrow, tall sliver that no longer
 // lined up with where a player could actually touch. FakeLandscapeView is still the right tool for
 // genuinely-whole-screen content with no fixed shape to match — just not this.
-function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmBackVisible, onCancelConfirmBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmBackVisible, onCancelConfirmBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, controlsVisible, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
   const liveOrientation = useOrientationState()
   // getFixedZoneRotation, not getViewRotation directly — this board's own zones are frozen forever
   // at 'faceToFace'/true (see GameRound), never reflowing no matter which way the device is spun
@@ -417,8 +436,12 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       deliberately ignores), the same top-left/top-right corners index.tsx's own trophy/settings
       buttons use — rather than just spinning in place while staying glued to the device's fixed
       physical top edge. !useCornerLayout (2P face-to-face): unchanged — leftSlot/rightSlot on the
-      shared vertical midline, glyph-only chipRotation, exactly as before. */}
-      {(phase === 'onboarding' || (phase === 'roundOver' && showResultDialog && !matchOver)) &&
+      shared vertical midline, glyph-only chipRotation, exactly as before.
+      Also shown through matchOver (previously hidden then) — matches BoxHockey's/AirHockey's/Pong's
+      identical always-visible back+settings chips, so there's a consistent way to back out (still
+      gated behind onBackPress's own "Quit Match?" confirmation whenever roundHistory is non-empty)
+      rather than only the MatchOverDialog's own exit button. */}
+      {controlsVisible &&
         (useCornerLayout ? (
           <FakeLandscapeView locked={userSettings.lockOrientation} style={[StyleSheet.absoluteFill, styles.cornerChipsWrap]}>
             <View style={[styles.cornerLeftSlot, { top: 8 + cornerInsets.top, left: 8 + cornerInsets.left }]}>
@@ -628,10 +651,11 @@ export default function GameScreen() {
     <View style={[styles.root, { backgroundColor: bg }]}>
       {/* Per-screen override, not a global default — reverts to whatever _layout.tsx's own
       RotationAwareStatusBar says the instant this screen unmounts (navigating back to /lobby,
-      which never renders its own StatusBar). Only hidden here when the board is actually bleeding
-      under it (extendIntoSafeArea); otherwise the board stays within the safe area and the status
-      bar has nothing to clash with, so there's nothing to add on top of the rotation-driven default. */}
-      {settings.extendIntoSafeArea && <StatusBar hidden />}
+      which never renders its own StatusBar). Unconditional, matching BoxHockey/AirHockey: hidden
+      for the whole time a match is in progress, regardless of whether the board itself is
+      bleeding under the safe area — full-screen immersion during actual play, not just when
+      there'd otherwise be a visible clash. */}
+      <StatusBar hidden />
       <View style={[styles.boardArea, settings.extendIntoSafeArea ? styles.boardAreaFullBleed : { top: insets.top, bottom: insets.bottom, left: insets.left + gutterWidth, right: insets.right + gutterWidth }]} onLayout={onBoardLayout}>
         {designSize && <GameRound width={designSize.width} height={designSize.height} liveWidth={liveWidth} liveHeight={liveHeight} safeAreaInsetsPx={safeAreaInsetsPx} settings={settings} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />}
       </View>
