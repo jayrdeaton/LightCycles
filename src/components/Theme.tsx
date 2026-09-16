@@ -1,11 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { getRgb, getThirdColor, Provider as AutoPaperProvider, ThemeSettings } from '@rific/auto-paper'
+import { Provider as AutoPaperProvider, themeActions, ThemeSettings } from '@rific/auto-paper'
 import * as SplashScreen from 'expo-splash-screen'
-import { ReactNode, useCallback, useEffect, useState } from 'react'
+import { ReactNode, useCallback } from 'react'
 import Reanimated from 'react-native-reanimated'
+import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 
 import { MONO_FONT } from '@/constants/fonts'
-import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR } from '@/constants/game'
+import { type AppDispatch, type RootState } from '@/redux/store'
 import { useSplashReady } from '@/utils/splashGate'
 
 SplashScreen.preventAutoHideAsync()
@@ -13,84 +13,37 @@ SplashScreen.preventAutoHideAsync()
 // splash view is just yanked off screen the instant every gate reports ready.
 SplashScreen.setOptions({ fade: true, duration: 400 })
 
-const APPEARANCE_STORAGE_KEY = 'lightcycles.appearance'
-// Exported: this is also the guest-color slot lobby.tsx's useSeatColors.tsx persists to (see its
-// own doc) — the two are deliberately the same key/shape rather than a redundant third one, since a
-// guest's own color IS what this cold-boot read is seeding before any seat-aware screen exists.
-export const PLAYER_COLORS_STORAGE_KEY = 'lightcycles.playerColors'
-
-function triadFor(p1: string, p2: string) {
-  return { primary: p1, secondary: p2, tertiary: getThirdColor(p1, p2) }
-}
-
-export function isValidHex(value: unknown): value is string {
-  return typeof value === 'string' && getRgb(value) !== null
-}
-
 interface Props {
   children: ReactNode
 }
 
 export function Theme({ children }: Props) {
-  const [settings, setSettings] = useState<Partial<ThemeSettings> | null>(null)
+  // Redux-backed now (redux/store.ts's `theme` key, @rific/auto-paper's own createThemeReducer,
+  // seeded with this app's own DEFAULT_P1_COLOR/DEFAULT_P2_COLOR and 'dark' appearance) rather than
+  // a local AsyncStorage read — PersistGate (see components/Providers.tsx) already blocks the whole
+  // app from rendering until redux-persist has rehydrated, so `settings` here is already the real
+  // persisted value (or the seeded default above) from this component's very first render, with no
+  // async load state of its own to track anymore.
+  const settings = useSelector((state: RootState) => state.theme, shallowEqual)
+  const dispatch = useDispatch<AppDispatch>()
 
-  useEffect(() => {
-    Promise.all([AsyncStorage.getItem(APPEARANCE_STORAGE_KEY), AsyncStorage.getItem(PLAYER_COLORS_STORAGE_KEY)])
-      .then(([storedAppearance, storedColors]) => {
-        const appearance = storedAppearance === 'light' || storedAppearance === 'dark' || storedAppearance === 'system' ? storedAppearance : 'dark'
+  // PersistGate already resolved this by the time Theme mounts (see `settings` above) — this gate
+  // is always instantly ready, same as Providers.tsx's own haptics/sound gates once those moved to
+  // Redux.
+  useSplashReady('theme', true)
 
-        let p1 = DEFAULT_P1_COLOR
-        let p2 = DEFAULT_P2_COLOR
-        if (storedColors) {
-          try {
-            const parsed = JSON.parse(storedColors)
-            if (isValidHex(parsed.p1)) p1 = parsed.p1
-            if (isValidHex(parsed.p2)) p2 = parsed.p2
-          } catch {
-            // Corrupt/stale blob — fall back to defaults above.
-          }
-        }
-        // Two players sharing a color makes round-end pips/labels genuinely ambiguous (see
-        // PLAN.md's color-uniqueness requirement) — only reachable here from a corrupted or
-        // hand-edited storage blob, since the title screen's own pickers already prevent it going
-        // forward, but still worth a safety fallback rather than silently rendering both players
-        // identically.
-        if (p1.toLowerCase() === p2.toLowerCase()) p2 = p2.toLowerCase() === DEFAULT_P1_COLOR.toLowerCase() ? DEFAULT_P2_COLOR : DEFAULT_P1_COLOR
-
-        setSettings({ appearance, color: triadFor(p1, p2) })
-      })
-      .catch(() => {
-        // A rejected read (corrupted native storage, quota issue, etc.) must still resolve this
-        // state — leaving it null would hold the splash gate (see useSplashReady below) forever,
-        // with no recovery short of reinstalling.
-        setSettings({ appearance: 'dark', color: triadFor(DEFAULT_P1_COLOR, DEFAULT_P2_COLOR) })
-      })
-  }, [])
-
-  // Loaded settings gate mounting AutoPaperProvider entirely (rather than mounting it immediately
-  // with defaults and patching `initialValue` once the read resolves): AutoPaperProvider's own
-  // `settings` state is a lazy useState(() => ...) that only reads `initialValue` on its very first
-  // mount, so a changed `initialValue` prop on a later render is silently ignored — persistence
-  // would appear to work (this component's own state updates) while the live theme never actually
-  // picks it up. Splash stays up for this window regardless (see useSplashReady below), so gating
-  // costs nothing visually.
-  useSplashReady('theme', settings !== null)
-
-  // Only persists — AutoPaperProvider owns the live settings after mount, and calling setSettings
-  // here too would update this parent component while the provider (a child) is rendering.
-  //
-  // Deliberately does NOT persist next.color here anymore: this fired on every live theme change
-  // regardless of *why* the color changed, which meant a profile-seat's clash-swap or manual
-  // recolor (a transient, per-match override — see lobby.tsx) silently overwrote this blob with a
-  // color the profile itself never saved, and a CPU seat's color fought over the exact same slot as
-  // a human guest's. Only lobby.tsx knows which seat is a profile/guest/CPU right now, so it's the
-  // one place set up to persist a seat's color correctly (see its own useSeatColors.tsx) — this
-  // still only ever seeds the cold-boot default from whatever that logic last wrote here.
-  const onChange = useCallback((next: ThemeSettings) => {
-    AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next.appearance).catch(() => {})
-  }, [])
-
-  if (!settings) return null
+  // Fully persists the live theme (appearance, color triad, plus auto-paper's own blur/harmony)
+  // straight to Redux on every change, matching Snake's own Theme.tsx. This used to deliberately
+  // persist only `appearance`, never `color`: it fired on every live theme change regardless of
+  // *why* the color changed, which meant a profile-seat's clash-swap or manual recolor (a
+  // transient, per-match override — see lobby.tsx) silently overwrote the cold-boot color default
+  // with a color the profile itself never saved, and a CPU seat's color fought over the same slot
+  // as a human guest's. That's no longer a concern now that lobby.tsx owns a *dedicated* "remember
+  // this for next time" memory of its own (redux/seatColorsSlice.ts's lastGuestColor/lastCpuColor,
+  // written explicitly wherever a guest/CPU color actually changes) — this slice is now just a
+  // harmless, redundant boot-seed of whatever the live theme last was, exactly like Snake's own
+  // `theme` slice.
+  const onChange = useCallback((next: ThemeSettings) => dispatch(themeActions.initialize(next)), [dispatch])
 
   return (
     // reanimated={Reanimated} is what makes Dialog's own animatedStyle prop do anything at all (see

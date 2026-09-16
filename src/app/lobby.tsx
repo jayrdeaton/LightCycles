@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useDispatch, useSelector } from 'react-redux'
 
 import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LOBBY_SHARED_CONTROLS_IDS, LobbySharedControls } from '@/components/LobbySharedControls'
@@ -14,7 +15,8 @@ import { SettingsDialog } from '@/components/SettingsDialog'
 import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR, LOBBY_PANEL_SWAP_FADE_MS, POWERUP_ALL_TYPES, POWERUP_ICONS } from '@/constants/game'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useProfiles } from '@/hooks/useProfiles'
-import { useSeatColors } from '@/hooks/useSeatColors'
+import { seatColorsActions } from '@/redux/seatColorsSlice'
+import { type AppDispatch, type RootState } from '@/redux/store'
 import { ArenaVariant, CpuDifficulty, GridSizeTier, KeyScheme, Player, PowerupType, SpeedTier, TrailSpeedTier } from '@/types'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameParams'
 import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
@@ -149,7 +151,9 @@ export default function LobbyScreen() {
   const p1Color = themeColors.primary
   const p2Color = themeColors.secondary
 
-  const { guestColors, cpuColor, loaded: seatColorsLoaded, setGuestColor, setCpuColor } = useSeatColors()
+  const dispatch = useDispatch<AppDispatch>()
+  const lastGuestColor = useSelector((state: RootState) => state.seatColors.lastGuestColor)
+  const lastCpuColor = useSelector((state: RootState) => state.seatColors.lastCpuColor)
   // Resolved fresh every render (used inside the color-change handlers and the mount/reapply
   // effect below) but deliberately never listed in either's own dependency array — only the
   // *id* driving a seat's identity is watched there (see that effect's own doc for why).
@@ -164,10 +168,10 @@ export default function LobbyScreen() {
   const persistSeatColor = useCallback(
     (seat: Player, hex: string) => {
       if (seat === 1 ? p1Profile : p2Profile) return
-      if (seat === 2 && !p2IsHuman) setCpuColor(hex)
-      else setGuestColor(seat, hex)
+      if (seat === 2 && !p2IsHuman) dispatch(seatColorsActions.setLastCpuColor(hex))
+      else dispatch(seatColorsActions.setLastGuestColor({ seat, color: hex }))
     },
-    [p1Profile, p2Profile, p2IsHuman, setGuestColor, setCpuColor]
+    [p1Profile, p2Profile, p2IsHuman, dispatch]
   )
 
   // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
@@ -182,7 +186,7 @@ export default function LobbyScreen() {
   // screen while it stays mounted (see the mount/reapply effect below), which snaps away any
   // in-progress override from this handler the moment it happens; re-applying the override after
   // that is on the player, not something this handler tries to protect. What DOES get persisted here
-  // is each touched seat's own guest/CPU slot (useSeatColors.tsx, via persistSeatColor above) —
+  // is each touched seat's own guest/CPU slot (redux/seatColorsSlice.ts, via persistSeatColor above) —
   // skipped entirely for a seat currently holding a profile, so on its own (i.e. absent an edit
   // elsewhere) this stays a transient, in-memory-only override on top of that profile's saved color,
   // snapped back by the mount/reapply effect below the next time this screen mounts or that profile's
@@ -227,22 +231,24 @@ export default function LobbyScreen() {
   // means an in-progress same-session override from handleP1ColorChange/handleP2ColorChange gets
   // snapped away the moment the underlying profile color changes elsewhere, same as it already does
   // on a fresh id selection — re-applying the override afterward is on the player, not something this
-  // effect tries to preserve through an edit that happened on another screen. guestColors/cpuColor
-  // aren't tracked the same way since nothing outside this screen's own pickers can ever change them
-  // mid-mount. seatColorsLoaded gates the whole thing until the guest/CPU AsyncStorage read resolves,
-  // so a not-yet-loaded default is never applied over a real persisted value it just hasn't read yet.
+  // effect tries to preserve through an edit that happened on another screen. lastGuestColor/
+  // lastCpuColor aren't tracked the same way since nothing outside this screen's own pickers ever
+  // dispatches into them. No load-gate needed here anymore either (unlike the old AsyncStorage-backed
+  // hooks/useSeatColors.ts, which had to wait for its own read to resolve): redux-persist's
+  // PersistGate (see components/Providers.tsx) already blocks the whole app from rendering until
+  // rehydration completes, so lastGuestColor/lastCpuColor are already real values by this
+  // component's very first render.
   useEffect(() => {
-    if (!seatColorsLoaded) return
-    const p1Target = p1Profile ? p1Profile.color : guestColors[1]
-    let p2Target = !p2IsHuman ? cpuColor : p2Profile ? p2Profile.color : guestColors[2]
-    // Same collision guard as Theme.tsx's own cold-boot read — an independently-sourced pair (say,
-    // a profile's saved favorite landing on the other seat's own remembered guest/CPU color) has no
-    // swap gesture behind it the way a manual recolor does, so this just nudges P2 off P1 rather
-    // than leaving both seats' round-end pips/labels ambiguous.
+    const p1Target = p1Profile ? p1Profile.color : lastGuestColor[1]
+    let p2Target = !p2IsHuman ? lastCpuColor : p2Profile ? p2Profile.color : lastGuestColor[2]
+    // Same collision guard Theme.tsx's own cold-boot read used to run — an independently-sourced
+    // pair (say, a profile's saved favorite landing on the other seat's own remembered guest/CPU
+    // color) has no swap gesture behind it the way a manual recolor does, so this just nudges P2 off
+    // P1 rather than leaving both seats' round-end pips/labels ambiguous.
     if (p2Target.toLowerCase() === p1Target.toLowerCase()) p2Target = p2Target.toLowerCase() === DEFAULT_P1_COLOR.toLowerCase() ? DEFAULT_P2_COLOR : DEFAULT_P1_COLOR
     setThemeColor({ color: { primary: p1Target, secondary: p2Target, tertiary: getThirdColor(p1Target, p2Target) } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastSelected[1], lastSelected[2], p1Profile?.color, p2Profile?.color, p2IsHuman, seatColorsLoaded])
+  }, [lastSelected[1], lastSelected[2], p1Profile?.color, p2Profile?.color, p2IsHuman])
 
   // Same swap-on-conflict shape as the color handlers above — but unlike color, this one *does*
   // keep syncing back to a currently-selected profile's own saved key scheme for as long as it
