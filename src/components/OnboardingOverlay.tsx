@@ -47,8 +47,8 @@ export default function OnboardingOverlay({ orientationMode, p1OnRight, rotation
   const opacity = useSharedValue(1)
   const [stageIndex, setStageIndex] = useState(0)
 
-  const playCountdownTick = useGameSound(require('../../assets/sounds/countdown-tick.wav'))
-  const playCountdownGo = useGameSound(require('../../assets/sounds/countdown-go.wav'))
+  const playCountdownTick = useGameSound(require('../../assets/sounds/countdownTick.wav'))
+  const playCountdownGo = useGameSound(require('../../assets/sounds/countdownGo.wav'))
   const soundRef = useRef({ playCountdownTick, playCountdownGo })
   useEffect(() => {
     soundRef.current = { playCountdownTick, playCountdownGo }

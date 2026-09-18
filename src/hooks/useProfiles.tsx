@@ -1,5 +1,5 @@
 import { createProfileRecord, Profile as BaseProfile, profilesActions, resolveInitialProfiles, useSharedProfilesSync } from '@tastic/profile'
-import { createContext, ReactNode, useCallback, useContext, useEffect } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 
 import { profileExtensionsActions } from '@/redux/profileExtensionsSlice'
@@ -27,6 +27,11 @@ interface CreateProfileInput {
 interface ProfilesContextValue {
   profiles: Profile[]
   lastSelected: Record<Player, string | null>
+  // True once the one-time initial reconciliation below (redux-persist's own already-rehydrated
+  // `profiles` against the shared App Group store) has completed — see ProfilesProvider's own doc.
+  // _layout.tsx's own ProfilesGate reads this to hold its children back (see splashGate.ts's
+  // 'profiles' gate) until real profile data exists, rather than the empty starting state.
+  loaded: boolean
   createProfile: (input: CreateProfileInput) => Profile
   updateProfile: (id: string, patch: Partial<CreateProfileInput>) => void
   // Also clears lastSelected for any seat currently pointing at this id, so the lobby immediately
@@ -63,6 +68,7 @@ export function ProfilesProvider({ children }: Props) {
   const extensions = useSelector((state: RootState) => state.profileExtensions)
   const lastSelected = useSelector((state: RootState) => state.profileSelection)
   const dispatch = useDispatch<AppDispatch>()
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -77,6 +83,7 @@ export function ProfilesProvider({ children }: Props) {
     resolveInitialProfiles(SHARED_GROUP_ID, profiles).then((resolved) => {
       if (cancelled) return
       dispatch(profilesActions.setAll(resolved))
+      setLoaded(true)
     })
     return () => {
       cancelled = true
@@ -143,7 +150,7 @@ export function ProfilesProvider({ children }: Props) {
 
   const mergedProfiles: Profile[] = profiles.map((p) => ({ ...p, keyScheme: extensions[p.id]?.keyScheme ?? DEFAULT_KEY_SCHEME }))
 
-  return <ProfilesContext.Provider value={{ profiles: mergedProfiles, lastSelected, createProfile, updateProfile, deleteProfile, selectProfile }}>{children}</ProfilesContext.Provider>
+  return <ProfilesContext.Provider value={{ profiles: mergedProfiles, lastSelected, loaded, createProfile, updateProfile, deleteProfile, selectProfile }}>{children}</ProfilesContext.Provider>
 }
 
 export function useProfiles() {

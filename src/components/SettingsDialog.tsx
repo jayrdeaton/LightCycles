@@ -1,3 +1,4 @@
+import { useUpdateErrorToast } from '@rific/toaster'
 import type { ViewRotation } from '@tastic/core'
 import { BaseSettingsDialog } from '@tastic/hud'
 
@@ -22,5 +23,5 @@ export interface SettingsDialogProps {
 // entirely inside that package now. Keeps this file's own external props unchanged so none of its
 // three call sites (index.tsx, lobby.tsx, game.tsx) needed to change.
 export function SettingsDialog({ visible, onDismiss, settings, setSettings, rotation = 0 }: SettingsDialogProps) {
-  return <BaseSettingsDialog visible={visible} onDismiss={onDismiss} rotation={rotation} version={release.otaVersion} lockOrientation={settings.lockOrientation} onLockOrientationChange={(value) => setSettings({ lockOrientation: value })} deferBottomEdgeGestures={settings.deferBottomEdgeGestures} onDeferBottomEdgeGestures={(value) => setSettings({ deferBottomEdgeGestures: value })} />
+  return <BaseSettingsDialog visible={visible} onDismiss={onDismiss} rotation={rotation} version={release.otaVersion} lockOrientation={settings.lockOrientation} onLockOrientationChange={(value) => setSettings({ lockOrientation: value })} deferBottomEdgeGestures={settings.deferBottomEdgeGestures} onDeferBottomEdgeGestures={(value) => setSettings({ deferBottomEdgeGestures: value })} onUpdateError={useUpdateErrorToast()} />
 }

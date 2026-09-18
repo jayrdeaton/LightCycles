@@ -5,10 +5,11 @@ import { StyleSheet, View } from 'react-native'
 import { ArenaVariant, GridSizeTier, PowerupType, SpeedTier, TrailSpeedTier } from '@/types'
 
 interface Props {
-  // Shared popover host — see LobbyPlayerPanel's identical `host` prop. Passed in vs-CPU mode so
-  // grid size/speed/etc. are mutually exclusive with the player panels' own color/control pickers
-  // too (there's only one human driving the whole screen there, so simultaneity across every
-  // picker just adds clutter). Omit to fall back to this component's own independent host.
+  // Shared popover host — see @tastic/hud's PlayerSetupPanel's identical `host` prop. Passed in
+  // vs-CPU mode so grid size/speed/etc. are mutually exclusive with the player panels' own
+  // color/control pickers too (there's only one human driving the whole screen there, so
+  // simultaneity across every picker just adds clutter). Omit to fall back to this component's own
+  // independent host.
   host?: PopoverHost
   gridSizeTier: GridSizeTier
   gridSizeOptions: MenuOption<GridSizeTier>[]
@@ -75,9 +76,10 @@ export const LOBBY_SHARED_CONTROLS_IDS = ['gridSize', 'arena', 'speed', 'trailSp
 export function LobbySharedControls({ host: sharedHost, gridSizeTier, gridSizeOptions, onGridSizeChange, speedTier, speedOptions, onSpeedChange, trailSpeedTier, trailSpeedOptions, onTrailSpeedChange, arenaVariant, arenaOptions, onArenaChange, extendIntoSafeArea, extendIntoSafeAreaOption, onExtendIntoSafeAreaChange, wrapEdges, wrapEdgesOption, onWrapEdgesChange, enabledPowerups, powerupOptions, onPowerupsChange, onRandomize, onReset, accentColor, mutedColor, onAccentColor, dark }: Props) {
   const ownHost = usePopoverHost()
   const host = sharedHost ?? ownHost
-  // See LobbyPlayerPanel's identical ownPopoverOpen comment — elevating this row for *any* open
-  // popover on a shared host (rather than only its own) would tie it with whichever sibling panel
-  // actually has the open popover, letting DOM order wrongly decide which one paints on top.
+  // See @tastic/hud's PlayerSetupPanel's identical ownPopoverOpen comment — elevating this row for
+  // *any* open popover on a shared host (rather than only its own) would tie it with whichever
+  // sibling panel actually has the open popover, letting DOM order wrongly decide which one paints
+  // on top.
   const ownPopoverOpen = host.openId !== null && LOBBY_SHARED_CONTROLS_IDS.includes(host.openId)
   // Same fg convention as every other component keying off a `dark` prop (LabeledDropdown,
   // SettingsDialog, etc.) — full-contrast, unlike mutedColor/accentColor above, which are tuned for

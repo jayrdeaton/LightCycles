@@ -1,4 +1,4 @@
-import { useAchievements } from '@tastic/achievements'
+import { mapUnlocksBySeat, useAchievements } from '@tastic/achievements'
 import { createContext, ReactNode, useCallback, useContext, useMemo } from 'react'
 
 import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
@@ -86,15 +86,7 @@ export function GameStatsProvider({ children }: Props) {
       // The package reports per-profile unlocks keyed by profile id, since it has no notion of
       // seats; game.tsx thinks in seats, so translate back through the same profileIds map that
       // produced them. A seat with no profile selected simply has no entry either way.
-      const profiles: Partial<Record<Player, AchievementDefinition[]>> = {}
-      if (context.profileIds) {
-        for (const seat of [1, 2] as Player[]) {
-          const profileId = context.profileIds[seat]
-          if (!profileId) continue
-          const unlockedForProfile = result.profiles[profileId]
-          if (unlockedForProfile && unlockedForProfile.length > 0) profiles[seat] = unlockedForProfile
-        }
-      }
+      const profiles = mapUnlocksBySeat([1, 2] as Player[], context.profileIds, result.profiles)
 
       return { device: result.device, profiles }
     },

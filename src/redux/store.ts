@@ -56,14 +56,24 @@ const rootReducer = combineReducers({
   // keyScheme — this app's one genuine per-profile extension field (see profileExtensionsSlice's
   // own doc) — deliberately kept out of the shared `profiles` slice above; always local.
   profileExtensions,
-  // lobby.tsx's own dedicated guest/CPU seat-color memory (lastGuestColor/lastCpuColor) — separate
-  // from `theme` above (a live snapshot only) — see seatColorsSlice.ts's own doc.
+  // lobby.tsx's own dedicated guest/CPU/profile-override seat-color memory (lastGuestColor/
+  // lastCpuColor/profileOverride) — separate from `theme` above (a live snapshot only) — see
+  // seatColorsSlice.ts's own doc.
   seatColors
 })
 
 const persistConfig = {
   key: 'root',
-  storage: AsyncStorage
+  storage: AsyncStorage,
+  // redux-persist defaults `timeout` to 5000ms: a failsafe setTimeout scheduled on every PERSIST
+  // dispatch to force-resolve rehydrate if storage never responds. It's never cleared once
+  // rehydrate resolves normally (only guarded by an internal `_sealed` flag), so it sits as a
+  // pending timer for up to 5s after every store creation — under Jest that's a real open handle
+  // ("A worker process has failed to exit gracefully"), confirmed via `jest --detectOpenHandles`
+  // pointing straight at persistReducer.js's setTimeout. Disabling it (falsy timeout skips the
+  // setTimeout call entirely) is redux-persist's own documented way to opt out; AsyncStorage reads
+  // failing to ever resolve at all isn't a failure mode worth a 5s failsafe for.
+  timeout: 0
 }
 
 const persistedReducer = persistReducer(persistConfig, rootReducer)

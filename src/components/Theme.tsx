@@ -1,4 +1,4 @@
-import { Provider as AutoPaperProvider, themeActions, ThemeSettings } from '@rific/auto-paper'
+import { Provider as AutoPaperProvider, themeActions, ThemeSettings, useThemeBridgeProps } from '@rific/auto-paper'
 import * as SplashScreen from 'expo-splash-screen'
 import { ReactNode, useCallback } from 'react'
 import Reanimated from 'react-native-reanimated'
@@ -6,7 +6,7 @@ import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 
 import { MONO_FONT } from '@/constants/fonts'
 import { type AppDispatch, type RootState } from '@/redux/store'
-import { useSplashReady } from '@/utils/splashGate'
+import { markSplashReady } from '@/utils/splashGate'
 
 SplashScreen.preventAutoHideAsync()
 // iOS defaults `fade` to false (Android always fades regardless of this flag), so without this the
@@ -27,10 +27,15 @@ export function Theme({ children }: Props) {
   const settings = useSelector((state: RootState) => state.theme, shallowEqual)
   const dispatch = useDispatch<AppDispatch>()
 
-  // PersistGate already resolved this by the time Theme mounts (see `settings` above) — this gate
-  // is always instantly ready, same as Providers.tsx's own haptics/sound gates once those moved to
-  // Redux.
-  useSplashReady('theme', true)
+  // A one-shot callback, not a boolean, so there's nothing for useSplashReady to watch — PersistGate
+  // already resolved `settings` by the time Theme mounts (see above), but that's necessary, not
+  // sufficient: AutoPaperProvider itself renders null internally until it's actually computed a
+  // theme object from that settings value, a separate, later step from Theme just mounting with
+  // valid settings in hand. Marking this gate ready unconditionally at mount — as this file used to,
+  // unlike every sibling app's own Theme.tsx — could let the splash screen lift while
+  // AutoPaperProvider was still rendering null underneath it. This instead marks the 'theme' gate
+  // (see src/utils/splashGate.ts) only once AutoPaperProvider itself reports a real theme.
+  const onReady = useCallback(() => markSplashReady('theme'), [])
 
   // Fully persists the live theme (appearance, color triad, plus auto-paper's own blur/harmony)
   // straight to Redux on every change, matching Snake's own Theme.tsx. This used to deliberately
@@ -45,6 +50,8 @@ export function Theme({ children }: Props) {
   // `theme` slice.
   const onChange = useCallback((next: ThemeSettings) => dispatch(themeActions.initialize(next)), [dispatch])
 
+  const bridgeProps = useThemeBridgeProps({ initialValue: settings, onChange, onReady })
+
   return (
     // reanimated={Reanimated} is what makes Dialog's own animatedStyle prop do anything at all (see
     // its source: `reanimated && animatedStyle ? <reanimated.View style={animatedStyle}>...` —
@@ -56,7 +63,7 @@ export function Theme({ children }: Props) {
     // fontFamily: MONO_FONT on nearly every individual Text/TextInput this app renders (achievements,
     // ProfileChip, ProfilePicker, ProfilesManager, LabeledDropdown, OnboardingOverlay); those explicit
     // overrides are now redundant (though harmless if any remain) since the theme itself supplies it.
-    <AutoPaperProvider initialValue={settings} onChange={onChange} reanimated={Reanimated} fontFamily={MONO_FONT}>
+    <AutoPaperProvider {...bridgeProps} reanimated={Reanimated} fontFamily={MONO_FONT}>
       {children}
     </AutoPaperProvider>
   )

@@ -1,8 +1,9 @@
 import { getBlendedColor, useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
+import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { computeContentBounds, FakeLandscapeView, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
-import { ConfirmDialog } from '@tastic/hud'
+import { ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
 import { needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -136,11 +137,7 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
   // Only asked once there's an actual score to lose (the pip row itself uses the same gate, see
   // OnboardingOverlay) — the very first round's back button still exits immediately, since there's
   // nothing yet for a confirmation to protect.
-  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
-  const onBackPress = useCallback(() => {
-    if (roundHistory.length > 0) setConfirmBackVisible(true)
-    else safeBack()
-  }, [roundHistory.length])
+  const { confirmVisible, requestBack, cancelBack } = useQuitConfirmation(() => roundHistory.length > 0, safeBack)
 
   const vibration = useVibration()
   const vibrationRef = useRef(vibration)
@@ -286,7 +283,7 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
       signal, and a hook call here (GameRound itself) would cascade a re-render into the board/
       touch subtree above on every tilt. See MatchOverlays' own doc for the full reasoning; the
       slot positioning/styling comments that used to live here now live there alongside the JSX. */}
-      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmBackVisible={confirmBackVisible} onCancelConfirmBack={() => setConfirmBackVisible(false)} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} controlsVisible={controlsVisible} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={safeBack} onBackPress={onBackPress} />
+      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmVisible={confirmVisible} cancelBack={cancelBack} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} controlsVisible={controlsVisible} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={safeBack} onBackPress={requestBack} />
     </>
   )
 }
@@ -305,8 +302,8 @@ interface MatchOverlaysProps {
   onSettingsOpen: () => void
   userSettings: GameSettings
   setUserSettings: (update: Partial<GameSettings>) => void
-  confirmBackVisible: boolean
-  onCancelConfirmBack: () => void
+  confirmVisible: boolean
+  cancelBack: () => void
   humanPlayers: Player[]
   colors: Record<Player, string>
   profileNames: Partial<Record<Player, string>>
@@ -349,7 +346,7 @@ interface MatchOverlaysProps {
 // whole overlay distorted a full-width/half-height zone into a narrow, tall sliver that no longer
 // lined up with where a player could actually touch. FakeLandscapeView is still the right tool for
 // genuinely-whole-screen content with no fixed shape to match — just not this.
-function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmBackVisible, onCancelConfirmBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, controlsVisible, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmVisible, cancelBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, controlsVisible, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
   const liveOrientation = useOrientationState()
   // getFixedZoneRotation, not getViewRotation directly — this board's own zones are frozen forever
   // at 'faceToFace'/true (see GameRound), never reflowing no matter which way the device is spun
@@ -404,7 +401,7 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       single-card branch (vsCpu) has no second seat to protect, so it gets singleSeatRotation same as
       MatchOverDialog/SettingsDialog below; the two-player, per-seat-split branch keeps the board's
       own fixed-zone `rotation` exactly as before. */}
-      {phase === 'onboarding' && !settingsOpen && !confirmBackVisible && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={humanPlayers.length === 1 ? singleSeatRotation : rotation} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={onOnboardingComplete} />}
+      {phase === 'onboarding' && !settingsOpen && !confirmVisible && <OnboardingOverlay orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={humanPlayers.length === 1 ? singleSeatRotation : rotation} humanPlayers={humanPlayers} p1Color={colors[1]} p2Color={colors[2]} roundHistory={roundHistory} onComplete={onOnboardingComplete} />}
 
       {phase === 'roundOver' && showResultDialog && !matchOver && outcome && <RoundOverDialog orientationMode={orientationMode} p1OnRight={p1OnRight} rotation={humanPlayers.length === 1 ? singleSeatRotation : rotation} humanPlayers={humanPlayers} gameMode={gameMode} outcome={outcome} colors={colors} profileUnlocked={profileUnlockToast} rematchReady={rematchReady} onRequestRematch={onRequestRematch} onQuit={onQuit} />}
 
@@ -420,7 +417,7 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       approved, deliberate trade-off. The pip row (same component OnboardingOverlay itself uses) is
       kept as the dialog's message content, showing exactly what's at stake instead of a sentence
       restating the round count. */}
-      <ConfirmDialog visible={confirmBackVisible} title='Quit Match?' message={<RoundHistoryPips roundHistory={roundHistory} p1Color={colors[1]} p2Color={colors[2]} />} confirmLabel='Quit' cancelLabel='Cancel' icon='alert-circle-outline' destructive={false} onConfirm={safeBack} onCancel={onCancelConfirmBack} rotation={singleSeatRotation} />
+      <ConfirmDialog visible={confirmVisible} title='Quit Match?' message={<RoundHistoryPips roundHistory={roundHistory} p1Color={colors[1]} p2Color={colors[2]} />} confirmLabel='Quit' cancelLabel='Cancel' icon='alert-circle-outline' destructive={false} onConfirm={safeBack} onCancel={cancelBack} rotation={singleSeatRotation} />
 
       {/* Back (onboarding only) + Settings chip buttons — moved here from GameRound for the
       identical reason as every other floating overlay in this component: they need the live
@@ -512,10 +509,10 @@ export default function GameScreen() {
   // Seat 2's own lastSelected is deliberately ignored in vsCpu mode below — it's a single piece of
   // state persisted across mode switches (useProfiles.tsx), so a profile picked for local two-player
   // seat 2 in an earlier session can otherwise still be sitting there once the player switches to
-  // vsCpu, where seat 2 is the CPU and has no profile-selection UI at all (LobbyPlayerPanel never
-  // renders a ProfilePicker for a non-human seat). Without this gate that stale id would flow
-  // straight into statsEngine.ts's profile-bump loop and MatchOverDialog's title, silently
-  // attributing the CPU's own wins/losses to a human profile.
+  // vsCpu, where seat 2 is the CPU and has no profile-selection UI at all (@tastic/hud's
+  // PlayerSetupPanel never renders a ProfilePicker for a non-human seat). Without this gate that
+  // stale id would flow straight into statsEngine.ts's profile-bump loop and MatchOverDialog's
+  // title, silently attributing the CPU's own wins/losses to a human profile.
   const [profileIds] = useState<Partial<Record<Player, string>>>(() => {
     const ids: Partial<Record<Player, string>> = {}
     if (savedProfiles.some((p) => p.id === lastSelected[1])) ids[1] = lastSelected[1] as string
@@ -579,11 +576,7 @@ export default function GameScreen() {
         // already gets its own rotated card (see RoundOverDialog/MatchOverDialog) — broadcasting
         // into both seats' own profileUnlockToast entries is what actually faces P2 correctly,
         // rather than the shared, unrotated toast neither seat's zone actually belongs to.
-        const broadcast = { ...result.profiles }
-        if (result.device.length > 0) {
-          broadcast[1] = [...(broadcast[1] ?? []), ...result.device]
-          broadcast[2] = [...(broadcast[2] ?? []), ...result.device]
-        }
+        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device)
         setProfileUnlockToast(broadcast)
       }
     },

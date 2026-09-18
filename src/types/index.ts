@@ -253,9 +253,9 @@ export interface ProfileStats extends DayStreakState {
 // A locally-saved player identity — name, color, and a short tag, entirely opt-in. Independent of
 // any seat's live round color (see components/Theme.tsx's playerColors) — selecting a profile for
 // a seat just pre-fills that seat's own color picker once as a starting point, never binds to it
-// going forward (see LobbyPlayerPanel.tsx's handleProfileSelect and lobby.tsx's own color-change
-// handlers, which deliberately don't sync back to the profile — a seat's live color is a per-match
-// override, not an edit to the saved "favorite").
+// going forward (see lobby.tsx's own handleP1ProfileSelect/handleP2ProfileSelect and its
+// color-change handlers, which deliberately don't sync back to the profile — a seat's live color is
+// a per-match override, not an edit to the saved "favorite").
 export interface Profile {
   id: string
   name: string
@@ -264,7 +264,7 @@ export interface Profile {
   // one emoji, or up to MAX_TAG_LENGTH plain characters (see profilesValidation.ts's isValidTag).
   // Can be empty (no tag yet), which just falls back to a generic icon wherever it's shown.
   tag: string
-  // Only ever surfaced in the editor UI on non-touch web (see LobbyPlayerPanel.tsx's showKeyScheme)
+  // Only ever surfaced in the editor UI on non-touch web (see lobby.tsx's own showKeyScheme)
   // since it's the one field with no meaning on a swipe-controlled touch device — still always set
   // (defaults to 'wasd'), same "always-set, sensible default" treatment as color/emoji, rather than
   // optional, so nothing downstream has to handle an absent value.

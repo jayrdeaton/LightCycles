@@ -1,15 +1,15 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
-import { FakeLandscapeView, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
-import { CornerActionButtons, MenuOption, PressAwayOverlay, ReadyButton, SharedActionBand, usePopoverHost } from '@tastic/hud'
+import { FakeLandscapeView, getViewRotation, rotateInsets, useIsTouchPrimaryDevice, useOrientationState } from '@tastic/core'
+import { CornerActionButtons, getColorPopoverId, getCpuDifficultyPopoverId, getInlineColorPickerContentSize, getLabeledDropdownContentHeight, LABELED_DROPDOWN_POPOVER_WIDTH, MenuOption, PlayerSetupPanel, PressAwayOverlay, ReadyButton, SectionedDropdown, SharedActionBand, usePopoverHost, useZoneClampedAlign } from '@tastic/hud'
+import type { Profile as BaseProfile } from '@tastic/profile'
 import { DualZoneLayout, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDispatch, useSelector } from 'react-redux'
 
-import { LobbyPlayerPanel } from '@/components/LobbyPlayerPanel'
 import { LOBBY_SHARED_CONTROLS_IDS, LobbySharedControls } from '@/components/LobbySharedControls'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR, LOBBY_PANEL_SWAP_FADE_MS, POWERUP_ALL_TYPES, POWERUP_ICONS } from '@/constants/game'
@@ -95,6 +95,14 @@ const POWERUP_OPTIONS: MenuOption<PowerupType>[] = [
   { value: 'overclock', label: 'Overclock', icon: POWERUP_ICONS.overclock }
 ]
 
+// Was previously declared in the now-removed local LobbyPlayerPanel.tsx (moved to @tastic/hud's
+// shared PlayerSetupPanel) — lives here now since this is its only remaining call site.
+const KEY_SCHEME_OPTIONS: { value: KeyScheme; label: string }[] = [
+  { value: 'wasd', label: 'WASD' },
+  { value: 'arrows', label: 'Arrows' },
+  { value: 'ijkl', label: 'IJKL' }
+]
+
 function pickRandom<T>(options: readonly { value: T }[]): T {
   return options[Math.floor(Math.random() * options.length)].value
 }
@@ -154,6 +162,11 @@ export default function LobbyScreen() {
   const dispatch = useDispatch<AppDispatch>()
   const lastGuestColor = useSelector((state: RootState) => state.seatColors.lastGuestColor)
   const lastCpuColor = useSelector((state: RootState) => state.seatColors.lastCpuColor)
+  // A manual recolor/clash-swap landing on a seat that currently has a profile selected — see
+  // redux/seatColorsSlice.ts's own doc comment. Persisted (survives navigation and relaunch), only
+  // cleared when that seat's own selection genuinely changes (handleP1ProfileSelect/
+  // handleP2ProfileSelect below), never by merely leaving and returning to this screen.
+  const profileOverride = useSelector((state: RootState) => state.seatColors.profileOverride)
   // Resolved fresh every render (used inside the color-change handlers and the mount/reapply
   // effect below) but deliberately never listed in either's own dependency array — only the
   // *id* driving a seat's identity is watched there (see that effect's own doc for why).
@@ -163,11 +176,16 @@ export default function LobbyScreen() {
   // Where a seat's color actually gets persisted once it changes live, split by who's occupying it
   // right now — shared by handleSeatColorChange below for both seats rather than each direction
   // re-deriving the same profile/guest/CPU branch as a mirror image of the other. A seat currently
-  // tethered to a profile is skipped entirely (see handleSeatColorChange's own doc for why);
-  // otherwise it's guest storage for a human seat, the CPU's own slot for seat 2 when it isn't human.
+  // tethered to a profile persists into its own profileOverride slot instead (redux/
+  // seatColorsSlice.ts) — see handleSeatColorChange's own doc for why that's still not the same
+  // thing as editing the profile's saved color; otherwise it's guest storage for a human seat, the
+  // CPU's own slot for seat 2 when it isn't human.
   const persistSeatColor = useCallback(
     (seat: Player, hex: string) => {
-      if (seat === 1 ? p1Profile : p2Profile) return
+      if (seat === 1 ? p1Profile : p2Profile) {
+        dispatch(seatColorsActions.setProfileOverride({ seat, color: hex }))
+        return
+      }
       if (seat === 2 && !p2IsHuman) dispatch(seatColorsActions.setLastCpuColor(hex))
       else dispatch(seatColorsActions.setLastGuestColor({ seat, color: hex }))
     },
@@ -182,15 +200,12 @@ export default function LobbyScreen() {
   // scheme below — a profile's color is its "favorite," a default to pre-fill the seat with at
   // selection time; freely repainting your own cycle for one match shouldn't silently redefine what
   // that profile is remembered as. Editing the saved color itself is Manage's own job now (see
-  // app/profiles.tsx's own ProfilesManager) — and, unlike key scheme, IS reflected back into this
-  // screen while it stays mounted (see the mount/reapply effect below), which snaps away any
-  // in-progress override from this handler the moment it happens; re-applying the override after
-  // that is on the player, not something this handler tries to protect. What DOES get persisted here
-  // is each touched seat's own guest/CPU slot (redux/seatColorsSlice.ts, via persistSeatColor above) —
-  // skipped entirely for a seat currently holding a profile, so on its own (i.e. absent an edit
-  // elsewhere) this stays a transient, in-memory-only override on top of that profile's saved color,
-  // snapped back by the mount/reapply effect below the next time this screen mounts or that profile's
-  // reselected.
+  // app/profiles.tsx's own ProfilesManager). What DOES get persisted here is each touched seat's own
+  // guest/CPU/profileOverride slot (redux/seatColorsSlice.ts, via persistSeatColor above) — a seat
+  // currently holding a profile lands in its own profileOverride instead of the profile's saved
+  // color, so it survives navigation and relaunch (see the mount/reapply effect below, which now
+  // honors it) until that profile's own selection genuinely changes (handleP1ProfileSelect/
+  // handleP2ProfileSelect below), which is the only thing that clears it.
   const handleSeatColorChange = useCallback(
     (seat: Player, hex: string) => {
       const otherSeat: Player = seat === 1 ? 2 : 1
@@ -208,10 +223,11 @@ export default function LobbyScreen() {
   const handleP1ColorChange = useCallback((hex: string) => handleSeatColorChange(1, hex), [handleSeatColorChange])
   const handleP2ColorChange = useCallback((hex: string) => handleSeatColorChange(2, hex), [handleSeatColorChange])
 
-  // Forces both seats' live colors back to their real source of truth on mount, whenever either
-  // seat's own selected-profile id changes (a fresh tap-select, or a guest/CPU<->profile switch
-  // either way), and now also whenever a *currently-selected* profile's own saved color changes —
-  // e.g. edited via Manage Profiles (app/profiles.tsx), which routes through the same useProfiles()
+  // Forces both seats' live colors back to their real source of truth on mount (this is also what
+  // makes a fresh navigation to this screen re-derive correctly — see below), whenever either seat's
+  // own selected-profile id changes (a fresh tap-select, or a guest/CPU<->profile switch either
+  // way), and now also whenever a *currently-selected* profile's own saved color changes — e.g.
+  // edited via Manage Profiles (app/profiles.tsx), which routes through the same useProfiles()
   // context and stays mounted underneath this screen (expo-router keeps prior screens mounted), so
   // p1Profile/p2Profile below pick up the edit immediately, but previously nothing re-ran this effect
   // to actually repaint with it until the profile was deselected/reselected. Without this, a seat
@@ -224,23 +240,39 @@ export default function LobbyScreen() {
   // commit — going straight to setThemeColor with both seats' final targets already resolved
   // sidesteps that entirely.
   //
+  // A profile-selected seat now resolves through profileOverride[seat] ?? profile.color instead of
+  // the profile's saved color outright — an active override (persistSeatColor above, via a manual
+  // swatch pick or clash-swap) wins over the profile's own color unconditionally, including across a
+  // fresh mount of this screen (this effect runs on mount same as any effect) and across a profile
+  // color edit made elsewhere while the override stays active. This is the actual fix for the
+  // override having previously been nothing more than whatever `theme` happened to already be
+  // showing: with no persisted state of its own, a fresh mount here (e.g. navigating away from this
+  // screen and back) had nothing to fall back on except this effect's own unconditional
+  // `profile.color`, silently discarding it — see redux/seatColorsSlice.ts's own profileOverride doc.
+  // The ONLY thing that clears an override now is that seat's own selection genuinely changing (see
+  // handleP1ProfileSelect/handleP2ProfileSelect below) — this effect must never do so itself, merely
+  // by running again.
+  //
   // p1Profile.color/p2Profile.color are tracked directly rather than the whole p1Profile/p2Profile
   // objects: useProfiles.tsx's own `profiles` getter maps a fresh array (and fresh profile objects)
   // on every render regardless of whether anything actually changed, so depending on the object
-  // itself would re-fire this effect every render instead of only on a real color change. This also
-  // means an in-progress same-session override from handleP1ColorChange/handleP2ColorChange gets
-  // snapped away the moment the underlying profile color changes elsewhere, same as it already does
-  // on a fresh id selection — re-applying the override afterward is on the player, not something this
-  // effect tries to preserve through an edit that happened on another screen. lastGuestColor/
-  // lastCpuColor aren't tracked the same way since nothing outside this screen's own pickers ever
-  // dispatches into them. No load-gate needed here anymore either (unlike the old AsyncStorage-backed
-  // hooks/useSeatColors.ts, which had to wait for its own read to resolve): redux-persist's
-  // PersistGate (see components/Providers.tsx) already blocks the whole app from rendering until
-  // rehydration completes, so lastGuestColor/lastCpuColor are already real values by this
-  // component's very first render.
+  // itself would re-fire this effect every render instead of only on a real color change.
+  // lastGuestColor/lastCpuColor/profileOverride aren't tracked the same way since nothing outside
+  // this screen's own pickers ever dispatches into them — reading them fresh (rather than listing
+  // them as deps) is safe precisely because their one and only writer here is either
+  // handleSeatColorChange (which already calls setThemeColor itself, in the same breath as
+  // persistSeatColor's dispatch, so this effect re-running off that same dispatch would just
+  // recompute an already-showing value) or handleP1ProfileSelect/handleP2ProfileSelect's own
+  // override-clear (whose accompanying selectProfile call changes lastSelected[seat], already listed
+  // below, so this effect re-runs anyway and picks the clear up that way). No load-gate needed here
+  // anymore either (unlike the old AsyncStorage-backed hooks/useSeatColors.ts, which had to wait for
+  // its own read to resolve):
+  // redux-persist's PersistGate (see components/Providers.tsx) already blocks the whole app from
+  // rendering until rehydration completes, so lastGuestColor/lastCpuColor/profileOverride are already
+  // real values by this component's very first render.
   useEffect(() => {
-    const p1Target = p1Profile ? p1Profile.color : lastGuestColor[1]
-    let p2Target = !p2IsHuman ? lastCpuColor : p2Profile ? p2Profile.color : lastGuestColor[2]
+    const p1Target = p1Profile ? (profileOverride[1] ?? p1Profile.color) : lastGuestColor[1]
+    let p2Target = !p2IsHuman ? lastCpuColor : p2Profile ? (profileOverride[2] ?? p2Profile.color) : lastGuestColor[2]
     // Same collision guard Theme.tsx's own cold-boot read used to run — an independently-sourced
     // pair (say, a profile's saved favorite landing on the other seat's own remembered guest/CPU
     // color) has no swap gesture behind it the way a manual recolor does, so this just nudges P2 off
@@ -256,9 +288,13 @@ export default function LobbyScreen() {
   // color does, so there's no override/favorite distinction worth drawing here. The live
   // SectionedDropdown never actually reaches the swap case on its own — the other seat's current
   // scheme stays in its own option list (so the gauge shows the right position) but renders
-  // disabled via takenValue (see LobbyPlayerPanel.tsx), so tapping it is a no-op — but a profile's
-  // saved key scheme (see ProfilePicker.tsx) pre-fills by calling this directly, bypassing that
-  // disabled state entirely, so a real collision is reachable there and needs the swap treatment too.
+  // disabled via takenValue (see this file's own p2KeySchemePicker below), so tapping it is a
+  // no-op — but a profile's
+  // saved key scheme (see handleP1ProfileSelect/handleP2ProfileSelect below) pre-fills by calling
+  // this directly, bypassing that disabled state entirely, so a real collision is reachable there
+  // and needs the swap treatment too. Declared above handleP1ProfileSelect/handleP2ProfileSelect
+  // (rather than after, next to the other seat-color handlers) purely so those can close over these
+  // without a temporal-dead-zone reference.
   const handleP1KeySchemeChange = useCallback(
     (scheme: KeyScheme) => {
       const nextP2 = scheme === settings.keyScheme[2] ? settings.keyScheme[1] : settings.keyScheme[2]
@@ -276,6 +312,44 @@ export default function LobbyScreen() {
       if (nextP1 !== settings.keyScheme[1] && lastSelected[1]) updateProfile(lastSelected[1], { keyScheme: nextP1 })
     },
     [setSettings, settings.keyScheme, lastSelected, updateProfile]
+  )
+
+  // The ONE legitimate place a seat's profileOverride actually clears — a fresh profile pick (a
+  // real tap-select, guest<->profile switch either way, or the same profile re-picked) means
+  // whatever override was riding on the *previous* selection shouldn't leak into the new one. The
+  // mount/reapply effect above then re-derives that seat's color from the freshly-selected profile's
+  // own saved color (or lastGuestColor/lastCpuColor for a guest/CPU pick), since lastSelected
+  // changing is already in that effect's own dependency array.
+  //
+  // Also pre-fills the seat's own key scheme from the selected profile, once, at selection time —
+  // stays fully editable afterward (see handleP1KeySchemeChange/handleP2KeySchemeChange's own
+  // sync-back above). Color does NOT get pre-filled here: the mount/reapply effect above already
+  // re-derives a seat's color from whichever profile ends up selected the moment lastSelected
+  // itself changes, so doing it here too would just read this callback's own stale pre-selection
+  // closure. This used to live inside this app's own now-removed LobbyPlayerPanel.tsx (folded into
+  // its internal handleProfileSelect wrapper around the onProfileSelect/onKeySchemeChange props);
+  // now that @tastic/hud's shared PlayerSetupPanel owns that wiring internally and only exposes a
+  // plain onProfileSelect, the pre-fill has to happen here instead. Takes @tastic/profile's own
+  // base Profile (matching PlayerSetupPanel's onProfileSelect signature exactly, which has no
+  // opinion on this app's own keyScheme field) and re-looks the full, app-typed Profile up out of
+  // this app's own `profiles` by id rather than casting the callback's own argument.
+  const handleP1ProfileSelect = useCallback(
+    (profile: BaseProfile | null) => {
+      dispatch(seatColorsActions.setProfileOverride({ seat: 1, color: null }))
+      selectProfile(1, profile?.id ?? null)
+      const full = profile && profiles.find((p) => p.id === profile.id)
+      if (full) handleP1KeySchemeChange(full.keyScheme)
+    },
+    [dispatch, selectProfile, profiles, handleP1KeySchemeChange]
+  )
+  const handleP2ProfileSelect = useCallback(
+    (profile: BaseProfile | null) => {
+      dispatch(seatColorsActions.setProfileOverride({ seat: 2, color: null }))
+      selectProfile(2, profile?.id ?? null)
+      const full = profile && profiles.find((p) => p.id === profile.id)
+      if (full) handleP2KeySchemeChange(full.keyScheme)
+    },
+    [dispatch, selectProfile, profiles, handleP2KeySchemeChange]
   )
 
   // Covers exactly the fields LobbySharedControls itself exposes — board shape/size, pace, and
@@ -364,9 +438,20 @@ export default function LobbyScreen() {
   const p2PanelHost = usePopoverHost()
   // vsCpu folds P2/CPU's panel into the same host as P1 + shared controls (see LobbySharedControls'
   // own comment) — two-player instead keeps p2PanelHost fully independent, and lobby.tsx (rather
-  // than LobbyPlayerPanel's own internal fallback) owns it explicitly so the press-away zones below
+  // than PlayerSetupPanel's own internal fallback) owns it explicitly so the press-away zones below
   // can close it without a P1-side tap ever reaching into P2's own popover, or vice versa.
   const p2Host = gameMode === 'vsCpu' ? controlsHost : p2PanelHost
+  // Vs-CPU's own standalone Ready button (below, not per-panel — see showReadyButton) is centered
+  // under the whole row, not under either player's own trigger, so it doesn't share a center with
+  // an open popover the way a two-player panel's *embedded* Ready button does. A side player's
+  // popover is centered on that player's own (off-center) trigger instead, so it can't fully cover
+  // the wider gap between its edge and the standalone button's — leaving a sliver of the button's
+  // own border peeking out from beside/behind the popover. Faded out instead while any player's
+  // popover is open, rather than trying to reconcile the two different centers. Same fix and same
+  // "p1-"/"p2-" prefix check as BoxHockey/AirHockey/Pong/Snake's own anyPlayerPickerOpen — this was
+  // the one sibling that had grown its own inline duplicate of this same host-openId check (see
+  // playersRowOpen below) without ever wiring it into the Ready button itself.
+  const anyPlayerPickerOpen = !!(controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-'))
   // Always 'P1', regardless of game mode — deliberately NOT MatchOverDialog's own 'YOU' fallback:
   // that dialog is a second-person message about the match's own outcome ("YOU WIN!"), where "YOU"
   // reads correctly regardless of profile labeling, but this trigger just needs to match its own
@@ -375,11 +460,56 @@ export default function LobbyScreen() {
   // the menu's own row, just not the idle label — using the same word for both would make it
   // impossible to tell "nothing selected yet" from "Player deliberately selected" at a glance).
   const p1GuestLabel = 'P1'
-  const p1Panel = <LobbyPlayerPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman keyScheme={settings.keyScheme[1]} onKeySchemeChange={handleP1KeySchemeChange} otherKeyScheme={p2IsHuman ? settings.keyScheme[2] : undefined} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={p2IsHuman ? lastSelected[2] : null} guestLabel={p1GuestLabel} onProfileSelect={(profile) => selectProfile(1, profile?.id ?? null)} onManageProfiles={() => router.push('/profiles')} />
+
+  // Key scheme has no meaning on a swipe-controlled touch device — matches the now-removed local
+  // LobbyPlayerPanel's own showKeyScheme gate (computed there per-instance; hoisted here since both
+  // seats' pickers need the same answer).
+  const isTouchPrimary = useIsTouchPrimaryDevice()
+  const showKeyScheme = Platform.OS === 'web' && !isTouchPrimary
+
+  // @tastic/hud's PlayerSetupPanel has no opinion on what (if anything) sits beside the color
+  // picker — see its own secondPicker doc — so this app constructs the same SectionedDropdown it
+  // always has and hands it in directly, sharing whichever host that seat's own color picker uses
+  // so a popover from either one still elevates the shared pickerRow correctly. secondPickerId
+  // names the popover id it opens under, so PlayerSetupPanel's own "elevate while one of my own
+  // popovers is open" logic still reacts to it exactly as it did when this lived inside
+  // LobbyPlayerPanel itself.
+  const p1KeySchemePicker = showKeyScheme ? <SectionedDropdown id='p1-controls' host={controlsHost} icon='keyboard-outline' accessibilityLabel='Control scheme' sections={[{ kind: 'single', id: 'controls', options: KEY_SCHEME_OPTIONS, value: settings.keyScheme[1], onChange: handleP1KeySchemeChange, takenValue: p2IsHuman ? settings.keyScheme[2] : undefined }]} accentColor={p1Color} mutedColor={fgMuted} dark={dark} /> : undefined
+  // CPU slot (vsCpu, !p2IsHuman) gets no key-scheme picker at all, same as the touch/non-web case —
+  // matches the old isHuman-gated check that used to live inside LobbyPlayerPanel itself.
+  const p2KeySchemePicker = p2IsHuman && showKeyScheme ? <SectionedDropdown id='p2-controls' host={p2Host} icon='keyboard-outline' accessibilityLabel='Control scheme' sections={[{ kind: 'single', id: 'controls', options: KEY_SCHEME_OPTIONS, value: settings.keyScheme[2], onChange: handleP2KeySchemeChange, takenValue: settings.keyScheme[1] }]} accentColor={p2Color} mutedColor={fgMuted} dark={dark} /> : undefined
+
+  // Unlike cpuDifficultyAlignOverride below (a confirmed no-op — the CPU-difficulty picker only
+  // ever renders outside a split-screen zone), every seat's color picker can render inside a live
+  // DualZoneLayout zone in twoPlayer mode, so both p1Panel and p2Panel need their own
+  // colorAlignOverride, computed unconditionally rather than gated on isHuman/p2IsHuman the way
+  // the CPU-difficulty one is. Both panels pass the same swatches (defaultColors), so their
+  // pickers share one content size, computed once here rather than twice.
+  const { width: windowWidth } = useWindowDimensions()
+  const colorContentSize = getInlineColorPickerContentSize(defaultColors.length, windowWidth)
+  const p1ColorOpen = controlsHost.openId === getColorPopoverId('p1')
+  const p1ColorAlign = useZoneClampedAlign(p1ColorOpen, colorContentSize.width, colorContentSize.height)
+  const p2ColorOpen = p2Host.openId === getColorPopoverId('p2')
+  const p2ColorAlign = useZoneClampedAlign(p2ColorOpen, colorContentSize.width, colorContentSize.height)
+
+  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} colorAlignOverride={p1ColorAlign} isHuman secondPicker={p1KeySchemePicker} secondPickerId={showKeyScheme ? 'p1-controls' : undefined} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={p2IsHuman ? lastSelected[2] : null} guestLabel={p1GuestLabel} onProfileSelect={handleP1ProfileSelect} onManageProfiles={() => router.push('/profiles')} />
   // P2/CPU centers its own popovers just like P1 — playersRowSpaced's gap already keeps it clear of
   // the screen's right edge (see that style's own comment), so there's no overflow to guard against.
+  //
+  // cpuDifficulty below renders through PlayerSetupPanel's own internal LabeledDropdown.
+  // PlayerSetupPanel now accepts cpuDifficultyAlignOverride (added to @tastic/hud specifically to
+  // close this gap — this app originated useZoneClampedAlign, and 4 sibling apps' own migration
+  // agents independently found they couldn't wire it into this exact picker for lack of this prop),
+  // so it's wired in below for consistency with every other popover in this app. It's a confirmed
+  // no-op here, though, same conclusion as before this prop existed: the CPU-difficulty picker only
+  // ever renders for a non-human seat 2, which only exists in vsCpu mode, and vsCpu always renders
+  // in the plain stacked (non-DualZoneLayout) branch below, never inside a split-screen zone — so
+  // useZoneBounds() is null there regardless, and useZoneClampedAlign's own doc says it returns
+  // useAutoAlign's plain result unchanged whenever that's the case.
+  const p2CpuDifficultyOpen = p2Host.openId === getCpuDifficultyPopoverId('p2')
+  const p2CpuDifficultyAlign = useZoneClampedAlign(p2CpuDifficultyOpen, LABELED_DROPDOWN_POPOVER_WIDTH, getLabeledDropdownContentHeight(CPU_DIFFICULTY_OPTIONS.length))
   const p2Panel = (
-    <LobbyPlayerPanel
+    <PlayerSetupPanel
       idPrefix='p2'
       host={p2Host}
       color={p2Color}
@@ -387,10 +517,10 @@ export default function LobbyScreen() {
       swatches={defaultColors}
       takenColor={p1Color}
       allowSwapTaken={gameMode === 'vsCpu'}
+      colorAlignOverride={p2ColorAlign}
       isHuman={p2IsHuman}
-      keyScheme={p2IsHuman ? settings.keyScheme[2] : undefined}
-      onKeySchemeChange={p2IsHuman ? handleP2KeySchemeChange : undefined}
-      otherKeyScheme={p2IsHuman ? settings.keyScheme[1] : undefined}
+      secondPicker={p2KeySchemePicker}
+      secondPickerId={p2IsHuman && showKeyScheme ? 'p2-controls' : undefined}
       ready={p2IsHuman ? ready[2] : undefined}
       onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined}
       dark={dark}
@@ -399,9 +529,10 @@ export default function LobbyScreen() {
       selectedProfileId={lastSelected[2]}
       takenProfileId={lastSelected[1]}
       guestLabel='P2'
-      onProfileSelect={p2IsHuman ? (profile) => selectProfile(2, profile?.id ?? null) : undefined}
+      onProfileSelect={p2IsHuman ? handleP2ProfileSelect : undefined}
       cpuDifficulty={p2IsHuman ? undefined : settings.cpuDifficulty}
       cpuDifficultyOptions={p2IsHuman ? undefined : CPU_DIFFICULTY_OPTIONS}
+      cpuDifficultyAlignOverride={p2IsHuman ? undefined : p2CpuDifficultyAlign}
       onCpuDifficultyChange={p2IsHuman ? undefined : (value: CpuDifficulty) => setSettings({ cpuDifficulty: value })}
     />
   )
@@ -506,7 +637,7 @@ export default function LobbyScreen() {
             // growing down into P1/P2's row below it) paints underneath whichever zone happens to
             // be the later DOM sibling, regardless of which one actually has something open — see
             // DualZoneLayout's own p1Elevated/p2Elevated/sharedElevated doc for the stacking-context
-            // reason a zone can't just self-elevate the way LobbyPlayerPanel/LobbySharedControls
+            // reason a zone can't just self-elevate the way PlayerSetupPanel/LobbySharedControls
             // already do internally. Same openId checks those two components use for their own
             // internal elevation, just re-run here for the outer zone wrapper neither of them can
             // reach on its own.
@@ -522,13 +653,13 @@ export default function LobbyScreen() {
             controlsHost) needs the row itself elevated to paint above that Ready button. Checking
             for a "p1-"/"p2-" id specifically, not just "is anything open on the host" — sharedControls
             also shares this host, and elevating this row for *its* popovers too would tie the two,
-            letting DOM order wrongly decide which one paints on top (see LobbyPlayerPanel and
+            letting DOM order wrongly decide which one paints on top (see PlayerSetupPanel and
             LobbySharedControls' matching ownPopoverOpen checks). */}
-            <Animated.View style={[styles.playersRow, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen, panelFadeStyle]}>
+            <Animated.View style={[styles.playersRow, anyPlayerPickerOpen && styles.playersRowOpen, panelFadeStyle]}>
               {isSideBySide && panelLayout.p1OnRight ? p2Panel : p1Panel}
               {isSideBySide && panelLayout.p1OnRight ? p1Panel : p2Panel}
             </Animated.View>
-            <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} />
+            <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} style={anyPlayerPickerOpen && styles.readyButtonHidden} />
           </View>
         )}
       </FakeLandscapeView>
@@ -563,7 +694,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  // Matches LobbyPlayerPanel's own pickerRow gap (12), not a wider "these are two separate
+  // Matches PlayerSetupPanel's own pickerRow gap (12), not a wider "these are two separate
   // panels" gap — matches BoxHockey/AirHockey/Pong/Snake's identical playersRow: the human and
   // CPU panels read as one evenly spaced row of triggers this way, rather than two
   // independently-centered blocks whose different widths throw off screen-edge symmetry. Applies
@@ -574,6 +705,14 @@ const styles = StyleSheet.create({
   },
   playersRowOpen: {
     zIndex: 100
+  },
+  // See anyPlayerPickerOpen above — opacity 0 (not display:'none') so the button keeps its layout
+  // space and doesn't shift the row above it when it disappears/reappears. pointerEvents:'none' too
+  // — otherwise the sliver an open popover doesn't cover would still be a live, just-invisible tap
+  // target underneath it.
+  readyButtonHidden: {
+    opacity: 0,
+    pointerEvents: 'none'
   },
   // Owns the flex-centering layout `container` used to apply directly — now one level deeper,
   // since everything visible sits inside FakeLandscapeView, which needs a real (not shrink-wrapped)
