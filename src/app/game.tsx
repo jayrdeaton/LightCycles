@@ -4,6 +4,7 @@ import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { computeContentBounds, FakeLandscapeView, getFixedZoneRotation, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
 import { ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
+import { type Profile } from '@tastic/profile'
 import { needsSharedNeutralZone } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -69,10 +70,10 @@ interface GameRoundProps {
   // Seat -> saved profile name, only for seats that had one selected at lobby handoff — see
   // GameScreen's own profileSnapshot comment for why this is frozen once, not read live.
   profileNames: Partial<Record<Player, string>>
-  // Seat -> saved profile tag (the same short color+tag identity ProfileChip shows elsewhere) —
-  // threaded alongside profileNames purely so MatchOverDialog can badge each achievement row with
-  // whichever seat actually earned it, once both seats can unlock in the same match (two-player).
-  profileTags: Partial<Record<Player, string>>
+  // Seat -> saved profile — threaded alongside profileNames purely so MatchOverDialog can mark each
+  // achievement row with whichever seat actually earned it (its ProfileChip), once both seats can
+  // unlock in the same match (two-player).
+  seatProfiles: Partial<Record<Player, Profile>>
   // Seat -> whatever newly unlocked on the MOST RECENT round recorded, for that seat's own rotated
   // card — that seat's own profile's unlocks, plus any device-wide achievement broadcast into BOTH
   // seats (a device-wide unlock has no single owner, but each seat still needs to see it facing
@@ -101,7 +102,7 @@ interface GameRoundProps {
 // GameScreen's own freeze of the values it passes down, but cheap insurance against this
 // component ever receiving something other than a stable value), so a later rotation never tears
 // the round down, rebuilds the grid, or touches the board/touch layer at all.
-function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, liveHeight, safeAreaInsetsPx: safeAreaInsetsPxAtMount, settings, colors, profileNames, profileTags, profileUnlockToast, orientationMode: orientationModeAtMount, p1OnRight: p1OnRightAtMount, roundHistory, onRoundOutcome }: GameRoundProps) {
+function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, liveHeight, safeAreaInsetsPx: safeAreaInsetsPxAtMount, settings, colors, profileNames, seatProfiles, profileUnlockToast, orientationMode: orientationModeAtMount, p1OnRight: p1OnRightAtMount, roundHistory, onRoundOutcome }: GameRoundProps) {
   const [width] = useState(widthAtMount)
   const [height] = useState(heightAtMount)
   const [safeAreaInsetsPx] = useState(safeAreaInsetsPxAtMount)
@@ -233,6 +234,14 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
     return () => setIsActivelyPlaying(false)
   }, [state.phase, setIsActivelyPlaying])
 
+  // No toast may stay on screen during live play — only between rounds or at match end. Vs CPU
+  // unlock toasts fire at round over and last 7s, so a quick Rematch would otherwise carry them
+  // past the countdown into the next round.
+  const { clear: clearToasts } = useToast()
+  useEffect(() => {
+    if (state.phase === 'playing') clearToasts()
+  }, [state.phase, clearToasts])
+
   // Fires the actual rematch once every human in this round has pressed Rematch — for vsCpu that's
   // just player 1 (see humanPlayers), so pressing it rematches immediately, matching the CPU always
   // "agreeing" instantly. Guarded on !matchOver so a Quit that lands the same tick a rematch was
@@ -283,7 +292,7 @@ function GameRound({ width: widthAtMount, height: heightAtMount, liveWidth, live
       signal, and a hook call here (GameRound itself) would cascade a re-render into the board/
       touch subtree above on every tilt. See MatchOverlays' own doc for the full reasoning; the
       slot positioning/styling comments that used to live here now live there alongside the JSX. */}
-      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmVisible={confirmVisible} cancelBack={cancelBack} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} controlsVisible={controlsVisible} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={safeBack} onBackPress={requestBack} />
+      <MatchOverlays phase={state.phase} orientationMode={orientationMode} p1OnRight={p1OnRight} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} userSettings={userSettings} setUserSettings={setUserSettings} confirmVisible={confirmVisible} cancelBack={cancelBack} humanPlayers={humanPlayers} colors={colors} profileNames={profileNames} seatProfiles={seatProfiles} profileUnlockToast={profileUnlockToast} roundHistory={roundHistory} onOnboardingComplete={beginPlaying} showResultDialog={showResultDialog} matchOver={matchOver} controlsVisible={controlsVisible} outcome={outcome ?? null} gameMode={settings.gameMode} rematchReady={rematchReady} onRequestRematch={handleRequestRematch} onQuit={handleQuit} onExit={safeBack} onBackPress={requestBack} />
     </>
   )
 }
@@ -307,7 +316,7 @@ interface MatchOverlaysProps {
   humanPlayers: Player[]
   colors: Record<Player, string>
   profileNames: Partial<Record<Player, string>>
-  profileTags: Partial<Record<Player, string>>
+  seatProfiles: Partial<Record<Player, Profile>>
   profileUnlockToast: Partial<Record<Player, AchievementDefinition[]>>
   roundHistory: RoundOutcome[]
   onOnboardingComplete: () => void
@@ -346,7 +355,7 @@ interface MatchOverlaysProps {
 // whole overlay distorted a full-width/half-height zone into a narrow, tall sliver that no longer
 // lined up with where a player could actually touch. FakeLandscapeView is still the right tool for
 // genuinely-whole-screen content with no fixed shape to match — just not this.
-function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmVisible, cancelBack, humanPlayers, colors, profileNames, profileTags, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, controlsVisible, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSettingsDismiss, onSettingsOpen, userSettings, setUserSettings, confirmVisible, cancelBack, humanPlayers, colors, profileNames, seatProfiles, profileUnlockToast, roundHistory, onOnboardingComplete, showResultDialog, matchOver, controlsVisible, outcome, gameMode, rematchReady, onRequestRematch, onQuit, onExit, onBackPress }: MatchOverlaysProps) {
   const liveOrientation = useOrientationState()
   // getFixedZoneRotation, not getViewRotation directly — this board's own zones are frozen forever
   // at 'faceToFace'/true (see GameRound), never reflowing no matter which way the device is spun
@@ -409,7 +418,7 @@ function MatchOverlays({ phase, orientationMode, p1OnRight, settingsOpen, onSett
       replaces it rather than layering on top, and tallies every round played this streak (see
       roundHistory) rather than just the one that just finished. Always ONE centered card regardless
       of humanPlayers.length (see this dialog's own doc), so it always wants singleSeatRotation. */}
-      {matchOver && <MatchOverDialog roundHistory={roundHistory} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlocked={profileUnlockToast} gameMode={gameMode} onExit={onExit} rotation={singleSeatRotation} />}
+      {matchOver && <MatchOverDialog roundHistory={roundHistory} colors={colors} profileNames={profileNames} seatProfiles={seatProfiles} profileUnlocked={profileUnlockToast} gameMode={gameMode} onExit={onExit} rotation={singleSeatRotation} />}
 
       {/* Shared @tastic/hud ConfirmDialog (fleet convergence) in place of this app's own
       hand-rolled overlay+card shell — trades this dialog's previous secondary-accent Quit button
@@ -527,16 +536,12 @@ export default function GameScreen() {
     if (p2) names[2] = p2.name
     return names
   })
-  // Same frozen-at-mount treatment as profileNames above, just the tag half of each seat's identity
-  // — see MatchOverDialog's own achievementAvatar, the one place that needs both halves at once.
-  const [profileTags] = useState<Partial<Record<Player, string>>>(() => {
-    const tags: Partial<Record<Player, string>> = {}
-    const p1 = savedProfiles.find((p) => p.id === lastSelected[1])
-    const p2 = settings?.gameMode !== 'vsCpu' ? savedProfiles.find((p) => p.id === lastSelected[2]) : undefined
-    if (p1) tags[1] = p1.tag
-    if (p2) tags[2] = p2.tag
-    return tags
-  })
+  // Same frozen-at-mount treatment as profileNames above — see MatchOverDialog's own achievement
+  // rows, which mark each unlock with its seat's ProfileChip.
+  const [seatProfiles] = useState<Partial<Record<Player, Profile>>>(() => ({
+    1: savedProfiles.find((p) => p.id === lastSelected[1]),
+    2: settings?.gameMode !== 'vsCpu' ? savedProfiles.find((p) => p.id === lastSelected[2]) : undefined
+  }))
 
   // Chronological record of each round's outcome this match, oldest first — lives here rather than
   // inside GameRound purely as the existing home for it; GameRound itself stays mounted for the
@@ -650,7 +655,7 @@ export default function GameScreen() {
       there'd otherwise be a visible clash. */}
       <StatusBar hidden />
       <View style={[styles.boardArea, settings.extendIntoSafeArea ? styles.boardAreaFullBleed : { top: insets.top, bottom: insets.bottom, left: insets.left + gutterWidth, right: insets.right + gutterWidth }]} onLayout={onBoardLayout}>
-        {designSize && <GameRound width={designSize.width} height={designSize.height} liveWidth={liveWidth} liveHeight={liveHeight} safeAreaInsetsPx={safeAreaInsetsPx} settings={settings} colors={colors} profileNames={profileNames} profileTags={profileTags} profileUnlockToast={profileUnlockToast} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />}
+        {designSize && <GameRound width={designSize.width} height={designSize.height} liveWidth={liveWidth} liveHeight={liveHeight} safeAreaInsetsPx={safeAreaInsetsPx} settings={settings} colors={colors} profileNames={profileNames} seatProfiles={seatProfiles} profileUnlockToast={profileUnlockToast} orientationMode={orientationMode} p1OnRight={p1OnRight} roundHistory={roundHistory} onRoundOutcome={handleRoundOutcome} />}
       </View>
     </View>
   )

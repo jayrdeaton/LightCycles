@@ -2,11 +2,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { combineReducers, configureStore, type Middleware } from '@reduxjs/toolkit'
 import { createThemeReducer, getThirdColor } from '@rific/auto-paper'
 import { defaultSoundSettings, hapticReducer, soundReducer, type SoundSettings } from '@rific/feedback-press'
+import { createReturningPlayerMigrate } from '@tastic/hud/guide'
 import { profilesReducer } from '@tastic/profile'
 import { FLUSH, PAUSE, PERSIST, persistReducer, persistStore, PURGE, REGISTER, REHYDRATE } from 'redux-persist'
 
 import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR } from '@/constants/game'
 
+import guide, { LEGACY_STORAGE_KEYS } from './guideSlice'
 import profileExtensions from './profileExtensionsSlice'
 import profileSelection from './profileSelectionSlice'
 import seatColors from './seatColorsSlice'
@@ -59,12 +61,20 @@ const rootReducer = combineReducers({
   // lobby.tsx's own dedicated guest/CPU/profile-override seat-color memory (lastGuestColor/
   // lastCpuColor/profileOverride) — separate from `theme` above (a live snapshot only) — see
   // seatColorsSlice.ts's own doc.
-  seatColors
+  seatColors,
+  // Which version of the how-to-play flow this player has finished or skipped — its own key rather
+  // than a GameSettings field, so it survives 'Reset stats'/'Reset match settings' and never touches
+  // gameSettingsValidation's strict isValidSettings. See guideSlice.ts's own doc.
+  guide
 })
 
-const persistConfig = {
+export const persistConfig = {
   key: 'root',
   storage: AsyncStorage,
+  // Grandfathers players from the shipped pre-redux build (7a595fa) past the guide: they have no root
+  // store yet, only that build's own keys, which would otherwise look like a fresh install. A no-op once
+  // a root store exists. See LEGACY_STORAGE_KEYS in guideSlice.ts.
+  migrate: createReturningPlayerMigrate(AsyncStorage, LEGACY_STORAGE_KEYS),
   // redux-persist defaults `timeout` to 5000ms: a failsafe setTimeout scheduled on every PERSIST
   // dispatch to force-resolve rehydrate if storage never responds. It's never cleared once
   // rehydrate resolves normally (only guarded by an internal `_sealed` flag), so it sits as a

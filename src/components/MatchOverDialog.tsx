@@ -1,5 +1,7 @@
-import { getContrastColor, useAutoPaperTheme } from '@rific/auto-paper'
+import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button } from '@rific/feedback-press'
+import { AchievementUnlockList } from '@tastic/hud'
+import { type Profile } from '@tastic/profile'
 import { StyleSheet, View } from 'react-native'
 import { Icon, Text } from 'react-native-paper'
 
@@ -17,10 +19,10 @@ export interface MatchOverDialogProps {
   // Seat -> saved profile name, only for seats that had one selected — falls back to the existing
   // P1/P2/YOU/CPU labels below when absent, so this stays fully optional/backward-compatible.
   profileNames?: Partial<Record<Player, string>>
-  // Seat -> saved profile tag — badges each achievement row below with whichever seat earned it
-  // (the same color+tag identity ProfileChip shows elsewhere), since both seats can unlock in the
-  // same two-player match and the list itself no longer lives in either seat's own score column.
-  profileTags?: Partial<Record<Player, string>>
+  // Seat -> saved profile — marks each achievement row below with whichever seat earned it (its
+  // ProfileChip, or a plain avatar in the seat's color for a guest), since both seats can unlock in
+  // the same two-player match and the list itself no longer lives in either seat's own score column.
+  seatProfiles?: Partial<Record<Player, Profile>>
   // Seat -> whatever that seat's OWN saved profile newly unlocked on the FINAL round of the match
   // (see useGameStats.tsx's recordRoundOutcome) — the match-ending round skips RoundOverDialog
   // entirely in favor of this dialog, so this is where that round's own badge needs to land instead.
@@ -34,13 +36,15 @@ export interface MatchOverDialogProps {
   rotation?: number
 }
 
+const SEATS: readonly Player[] = [1, 2]
+
 // Shown once either player quits from the round-over dialog (see RoundOverDialog) — "it's over"
 // covers every round played this streak, not just the one that just finished, so this tallies the
 // whole roundHistory rather than repeating that last round's own outcome. One shared, unrotated
 // dialog (matching game.tsx's existing quit-confirmation dialog) rather than RoundOverDialog's
 // per-player split — there's no decision left for either player to make here, just a result to
 // read before backing out to the menu.
-export default function MatchOverDialog({ roundHistory, colors, profileNames = {}, profileTags = {}, profileUnlocked = {}, gameMode, onExit, rotation = 0 }: MatchOverDialogProps) {
+export default function MatchOverDialog({ roundHistory, colors, profileNames = {}, seatProfiles = {}, profileUnlocked = {}, gameMode, onExit, rotation = 0 }: MatchOverDialogProps) {
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
@@ -92,35 +96,7 @@ export default function MatchOverDialog({ roundHistory, colors, profileNames = {
         the score column above and threw off the vertical alignment between the two scores whenever
         only one side had a badge) — one row per achievement, under the pips where it doesn't affect
         the score row's height. */}
-        {(profileUnlocked[1]?.length ?? 0) + (profileUnlocked[2]?.length ?? 0) > 0 && (
-          <View style={styles.achievementList}>
-            {([1, 2] as Player[]).flatMap((player) =>
-              (profileUnlocked[player] ?? []).map((achievement) => (
-                <View key={`${player}-${achievement.id}`} style={styles.achievementRow}>
-                  {/* Whose achievement this is — the same color+tag identity ProfileChip shows
-                elsewhere — now that both seats' unlocks share one list instead of their own score
-                column, color alone (as the icon used to carry) isn't enough once a tier color
-                takes that role instead. */}
-                  <View style={[styles.achievementAvatar, { backgroundColor: colors[player] }]}>
-                    {profileTags[player] ? (
-                      <Text style={[styles.achievementAvatarTag, { color: getContrastColor(colors[player]) }]} numberOfLines={1} adjustsFontSizeToFit>
-                        {profileTags[player]}
-                      </Text>
-                    ) : (
-                      <Icon source='account' size={10} color={getContrastColor(colors[player])} />
-                    )}
-                  </View>
-                  <View style={[styles.achievementIconBadge, { backgroundColor: ACHIEVEMENT_TIER_COLORS[achievement.tier] }]}>
-                    <Icon source={achievement.icon} size={12} color='#000000' />
-                  </View>
-                  <Text style={[styles.achievementRowLabel, { color: fg }]} numberOfLines={1}>
-                    {achievement.title}
-                  </Text>
-                </View>
-              ))
-            )}
-          </View>
-        )}
+        <AchievementUnlockList unlocks={profileUnlocked} seats={SEATS} owners={{ 1: { profile: seatProfiles[1], color: colors[1] }, 2: { profile: seatProfiles[2], color: colors[2] } }} tierColors={ACHIEVEMENT_TIER_COLORS} fg={fg} />
         <Button mode='contained' onPress={onExit} style={styles.overlayButton} buttonColor={themeColors.primary} textColor={themeColors.onPrimary}>
           Quit
         </Button>
@@ -130,38 +106,6 @@ export default function MatchOverDialog({ roundHistory, colors, profileNames = {
 }
 
 const styles = StyleSheet.create({
-  achievementAvatar: {
-    alignItems: 'center',
-    borderRadius: 9,
-    height: 18,
-    justifyContent: 'center',
-    width: 18
-  },
-  achievementAvatarTag: {
-    fontSize: 8,
-    fontWeight: '700',
-    paddingHorizontal: 1
-  },
-  achievementIconBadge: {
-    alignItems: 'center',
-    borderRadius: 9,
-    height: 18,
-    justifyContent: 'center',
-    width: 18
-  },
-  achievementList: {
-    gap: 6
-  },
-  achievementRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6
-  },
-  achievementRowLabel: {
-    flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700'
-  },
   overlay: {
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.72)',

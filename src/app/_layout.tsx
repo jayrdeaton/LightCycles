@@ -11,6 +11,7 @@ import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { Fonts } from '@/components/Fonts'
+import { GuideHost } from '@/components/GuideHost'
 import { Providers } from '@/components/Providers'
 import { Theme } from '@/components/Theme'
 import { UpdateDialog } from '@/components/UpdateDialog'
@@ -104,7 +105,13 @@ export default function RootLayout() {
                         surface/text colors track light/dark and the player-color triad automatically,
                         with no manual color threading at each call site. */}
                         <ToastProvider haptics={Haptics} paper={RNPaper}>
-                          <AppStack />
+                          {/* Wraps the stack (rather than sitting beside it like UpdateDialog) because
+                          Home's useAutoShowGuide() and every Settings dialog's "How to play" row reach it
+                          through context — see GuideHost's own doc. Must stay inside ToastProvider/
+                          OrientationProvider: the card renders through a Portal and reads the live tilt. */}
+                          <GuideHost>
+                            <AppStack />
+                          </GuideHost>
                           <AppRotationAwareStatusBar />
                           <UpdateDialog />
                           {/* historyButton/clearButton off — this app has no history modal use case
